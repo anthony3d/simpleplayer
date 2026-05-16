@@ -3,12 +3,11 @@
     package="com.example.simpleplayer">
 
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
-    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
 
     <application
         android:allowBackup="true"
-        android:icon="@mipmap/ic_launcher"
-        android:label="Simple Player"
+        android:icon="@android:drawable/ic_menu_edit"
+        android:label="MP3 Player"
         android:theme="@style/Theme.AppCompat.Light">
         <activity
             android:name=".MainActivity"
