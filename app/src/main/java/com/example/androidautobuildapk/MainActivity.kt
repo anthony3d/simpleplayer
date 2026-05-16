@@ -6,7 +6,9 @@ import android.media.MediaPlayer
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.widget.*
+import android.widget.Button
+import android.widget.EditText
+import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
@@ -14,8 +16,7 @@ import java.io.File
 
 class MainActivity : AppCompatActivity() {
     
-    private lateinit var etDirectory: EditText
-    private lateinit var etFilename: EditText
+    private lateinit var etPath: EditText
     private lateinit var etPause: EditText
     private lateinit var btnPlay: Button
     private lateinit var btnStop: Button
@@ -24,67 +25,61 @@ class MainActivity : AppCompatActivity() {
     private var mediaPlayer: MediaPlayer? = null
     private val handler = Handler(Looper.getMainLooper())
     private var isPlaying = false
-    private var pauseSeconds = 0L
+    private var currentFilePath = ""
     
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
         
-        etDirectory = findViewById(R.id.etDirectory)
-        etFilename = findViewById(R.id.etFilename)
+        etPath = findViewById(R.id.etPath)
         etPause = findViewById(R.id.etPause)
         btnPlay = findViewById(R.id.btnPlay)
         btnStop = findViewById(R.id.btnStop)
         tvStatus = findViewById(R.id.tvStatus)
         
-        // Пример пути: /storage/emulated/0/Music
-        etDirectory.setText("/storage/emulated/0/Music")
-        etFilename.setText("song.mp3")
+        etPath.setText("/storage/emulated/0/Music/song.mp3")
         etPause.setText("2")
         
         btnPlay.setOnClickListener { startPlaying() }
         btnStop.setOnClickListener { stopPlaying() }
         
-        checkPermissions()
+        checkPermission()
     }
     
-    private fun checkPermissions() {
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_MEDIA_AUDIO)
+    private fun checkPermission() {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE)
             != PackageManager.PERMISSION_GRANTED) {
             ActivityCompat.requestPermissions(this, 
-                arrayOf(Manifest.permission.READ_MEDIA_AUDIO), 1)
+                arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE), 1)
         }
     }
     
     private fun startPlaying() {
-        val directory = etDirectory.text.toString()
-        val filename = etFilename.text.toString()
+        val filePath = etPath.text.toString()
         val pauseText = etPause.text.toString()
         
-        if (directory.isEmpty() || filename.isEmpty()) {
-            tvStatus.text = "Ошибка: укажите путь и файл"
+        if (filePath.isEmpty()) {
+            tvStatus.text = "Укажите полный путь к MP3 файлу"
             return
         }
         
-        pauseSeconds = pauseText.toLongOrNull() ?: 0
-        
-        val filePath = if (directory.endsWith("/")) directory + filename 
-                       else "$directory/$filename"
         val file = File(filePath)
-        
         if (!file.exists()) {
             tvStatus.text = "Файл не найден: $filePath"
             return
         }
         
         stopPlaying()
+        currentFilePath = filePath
         isPlaying = true
-        playWithLoop(filePath)
         
-        tvStatus.text = "Воспроизведение: $filename (пауза ${pauseSeconds}с)"
+        val pauseSeconds = pauseText.toLongOrNull() ?: 0
+        playWithDelay(currentFilePath, pauseSeconds)
+        
+        tvStatus.text = "Играет: ${file.name} (пауза ${pauseSeconds}с)"
     }
     
-    private fun playWithLoop(filePath: String) {
+    private fun playWithDelay(filePath: String, delaySeconds: Long) {
         if (!isPlaying) return
         
         try {
@@ -94,10 +89,10 @@ class MainActivity : AppCompatActivity() {
                 prepare()
                 setOnCompletionListener {
                     if (isPlaying) {
-                        tvStatus.text = "Пауза ${pauseSeconds}с..."
+                        tvStatus.text = "Пауза ${delaySeconds} сек..."
                         handler.postDelayed({
-                            playWithLoop(filePath)
-                        }, pauseSeconds * 1000)
+                            playWithDelay(filePath, delaySeconds)
+                        }, delaySeconds * 1000)
                     }
                 }
                 start()
@@ -111,8 +106,10 @@ class MainActivity : AppCompatActivity() {
     private fun stopPlaying() {
         isPlaying = false
         handler.removeCallbacksAndMessages(null)
-        mediaPlayer?.stop()
-        mediaPlayer?.release()
+        mediaPlayer?.let {
+            if (it.isPlaying) it.stop()
+            it.release()
+        }
         mediaPlayer = null
         tvStatus.text = "Остановлено"
     }
