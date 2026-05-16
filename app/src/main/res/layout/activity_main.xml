@@ -9,24 +9,16 @@
     <TextView
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="Simple MP3 Player"
+        android:text="MP3 Цикл-Плеер"
         android:textSize="24sp"
         android:textStyle="bold"
         android:layout_marginBottom="30dp"/>
 
     <EditText
-        android:id="@+id/etDirectory"
+        android:id="@+id/etPath"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:hint="Путь к папке"
-        android:inputType="text"
-        android:layout_marginBottom="10dp"/>
-
-    <EditText
-        android:id="@+id/etFilename"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:hint="Имя файла.mp3"
+        android:hint="Полный путь к файлу.mp3"
         android:inputType="text"
         android:layout_marginBottom="10dp"/>
 
@@ -48,7 +40,7 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="▶ Воспроизвести"
+            android:text="Воспроизвести"
             android:layout_marginEnd="10dp"/>
 
         <Button
@@ -56,7 +48,7 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="⏹ Стоп"/>
+            android:text="Стоп"/>
     </LinearLayout>
 
     <TextView
