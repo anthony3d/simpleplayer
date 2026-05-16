@@ -25,7 +25,6 @@ class MainActivity : AppCompatActivity() {
     private var mediaPlayer: MediaPlayer? = null
     private val handler = Handler(Looper.getMainLooper())
     private var isPlaying = false
-    private var currentFilePath = ""
     
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -70,16 +69,15 @@ class MainActivity : AppCompatActivity() {
         }
         
         stopPlaying()
-        currentFilePath = filePath
         isPlaying = true
         
         val pauseSeconds = pauseText.toLongOrNull() ?: 0
-        playWithDelay(currentFilePath, pauseSeconds)
+        playWithLoop(filePath, pauseSeconds)
         
         tvStatus.text = "Играет: ${file.name} (пауза ${pauseSeconds}с)"
     }
     
-    private fun playWithDelay(filePath: String, delaySeconds: Long) {
+    private fun playWithLoop(filePath: String, delaySeconds: Long) {
         if (!isPlaying) return
         
         try {
@@ -91,7 +89,7 @@ class MainActivity : AppCompatActivity() {
                     if (isPlaying) {
                         tvStatus.text = "Пауза ${delaySeconds} сек..."
                         handler.postDelayed({
-                            playWithDelay(filePath, delaySeconds)
+                            playWithLoop(filePath, delaySeconds)
                         }, delaySeconds * 1000)
                     }
                 }
