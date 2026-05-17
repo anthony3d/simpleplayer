@@ -73,20 +73,28 @@ class MainActivity : AppCompatActivity() {
         if (requestCode == PICK_AUDIO_FILE && resultCode == RESULT_OK) {
             data?.data?.let { uri ->
                 // Получаем持久ный доступ к файлу
-                contentResolver.takePersistableUriPermission(
-                    uri, 
-                    Intent.FLAG_GRANT_READ_URI_PERMISSION
-                )
+                try {
+                    contentResolver.takePersistableUriPermission(
+                        uri, 
+                        Intent.FLAG_GRANT_READ_URI_PERMISSION
+                    )
+                } catch (e: Exception) {
+                    // Некоторые версии Android не поддерживают это
+                    e.printStackTrace()
+                }
                 
                 // Получаем реальный путь или отображаемое имя
                 val filePath = getFilePathFromUri(uri)
-                if (filePath != null) {
+                val fileName = getFileName(uri)
+                
+                if (filePath != null && File(filePath).exists()) {
                     etPath.setText(filePath)
-                    tvStatus.text = "Выбран: ${getFileName(uri)}"
+                    tvStatus.text = "Выбран: $fileName"
+                    Toast.makeText(this, "Файл выбран: $fileName", Toast.LENGTH_SHORT).show()
                 } else {
-                    // Если не удалось получить путь, используем URI
-                    etPath.setText(uri.toString())
-                    tvStatus.text = "Выбран (URI): ${getFileName(uri)}"
+                    // Если не удалось получить путь, показываем что нужно выбрать по-другому
+                    tvStatus.text = "Не удалось получить путь к файлу"
+                    Toast.makeText(this, "Выберите файл из папки Music или Download", Toast.LENGTH_LONG).show()
                 }
             }
         }
