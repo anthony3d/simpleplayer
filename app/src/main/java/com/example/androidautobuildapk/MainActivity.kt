@@ -29,6 +29,7 @@ class MainActivity : AppCompatActivity() {
     private var isPlaying = false
     private var currentFilePath = ""
     private var currentPauseSeconds = 0L
+    private var isPausing = false
     
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -81,50 +82,51 @@ class MainActivity : AppCompatActivity() {
             return
         }
         
-        stopPlaying()
+        // Полная остановка текущего воспроизведения
+        if (mediaPlayer != null) {
+            stopPlaying()
+        }
         
         currentFilePath = filePath
         currentPauseSeconds = pauseText.toLongOrNull() ?: 0
         isPlaying = true
+        isPausing = false
         
-        // Запускаем первый раз
-        playFile(currentFilePath)
+        // Запускаем воспроизведение
+        playWithLoop()
         
         tvStatus.text = "Играет: ${file.name} (пауза ${currentPauseSeconds}с)"
         Toast.makeText(this, "Воспроизведение: ${file.name}", Toast.LENGTH_SHORT).show()
     }
     
-    private fun playFile(filePath: String) {
+    private fun playWithLoop() {
         if (!isPlaying) return
         
         try {
-            // Создаем новый MediaPlayer для каждого воспроизведения
-            val newPlayer = MediaPlayer().apply {
-                setDataSource(filePath)
+            mediaPlayer = MediaPlayer().apply {
+                setDataSource(currentFilePath)
                 prepare()
                 setVolume(1.0f, 1.0f)
                 setOnCompletionListener {
-                    // Когда трек закончился, планируем следующий с паузой
-                    if (isPlaying) {
+                    if (isPlaying && !isPausing) {
+                        isPausing = true
                         runOnUiThread {
                             tvStatus.text = "Пауза ${currentPauseSeconds} сек..."
                         }
+                        
+                        // Ждем указанное количество секунд
                         handler.postDelayed({
                             if (isPlaying) {
-                                playFile(filePath)
+                                // Перезапускаем
+                                isPausing = false
+                                mediaPlayer?.reset()
+                                playWithLoop()
                             }
                         }, currentPauseSeconds * 1000)
                     }
                 }
+                start()
             }
-            
-            // Заменяем старый плеер новым
-            val oldPlayer = mediaPlayer
-            mediaPlayer = newPlayer
-            oldPlayer?.release()
-            
-            newPlayer.start()
-            
         } catch (e: Exception) {
             e.printStackTrace()
             runOnUiThread {
@@ -137,6 +139,7 @@ class MainActivity : AppCompatActivity() {
     
     private fun stopPlaying() {
         isPlaying = false
+        isPausing = false
         handler.removeCallbacksAndMessages(null)
         mediaPlayer?.let {
             try {
