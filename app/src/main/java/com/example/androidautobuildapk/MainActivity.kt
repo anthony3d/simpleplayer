@@ -1,12 +1,17 @@
 package com.example.simpleplayer
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.database.Cursor
 import android.media.MediaPlayer
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.provider.MediaStore
+import android.provider.OpenableColumns
 import android.widget.Button
 import android.widget.EditText
 import android.widget.TextView
@@ -22,6 +27,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var etPause: EditText
     private lateinit var btnPlay: Button
     private lateinit var btnStop: Button
+    private lateinit var btnSelect: Button
     private lateinit var tvStatus: TextView
     
     private var mediaPlayer: MediaPlayer? = null
@@ -31,6 +37,8 @@ class MainActivity : AppCompatActivity() {
     private var currentPauseSeconds = 0L
     private var checkPositionRunnable: Runnable? = null
     
+    private val PICK_AUDIO_FILE = 1000
+    
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
@@ -39,15 +47,79 @@ class MainActivity : AppCompatActivity() {
         etPause = findViewById(R.id.etPause)
         btnPlay = findViewById(R.id.btnPlay)
         btnStop = findViewById(R.id.btnStop)
+        btnSelect = findViewById(R.id.btnSelect)
         tvStatus = findViewById(R.id.tvStatus)
         
-        etPath.setText("/storage/emulated/0/Download/song.mp3")
         etPause.setText("2")
         
+        btnSelect.setOnClickListener { selectAudioFile() }
         btnPlay.setOnClickListener { startPlaying() }
         btnStop.setOnClickListener { stopPlaying() }
         
         checkPermissions()
+    }
+    
+    private fun selectAudioFile() {
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "audio/*"
+            putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("audio/mpeg", "audio/mp3"))
+        }
+        startActivityForResult(intent, PICK_AUDIO_FILE)
+    }
+    
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == PICK_AUDIO_FILE && resultCode == RESULT_OK) {
+            data?.data?.let { uri ->
+                // Получаем持久ный доступ к файлу
+                contentResolver.takePersistableUriPermission(
+                    uri, 
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+                
+                // Получаем реальный путь или отображаемое имя
+                val filePath = getFilePathFromUri(uri)
+                if (filePath != null) {
+                    etPath.setText(filePath)
+                    tvStatus.text = "Выбран: ${getFileName(uri)}"
+                } else {
+                    // Если не удалось получить путь, используем URI
+                    etPath.setText(uri.toString())
+                    tvStatus.text = "Выбран (URI): ${getFileName(uri)}"
+                }
+            }
+        }
+    }
+    
+    private fun getFilePathFromUri(uri: Uri): String? {
+        // Пробуем получить реальный путь для внешнего хранилища
+        if (uri.scheme == "file") {
+            return uri.path
+        }
+        
+        // Для MediaStore
+        val projection = arrayOf(MediaStore.MediaColumns.DATA)
+        contentResolver.query(uri, projection, null, null, null)?.use { cursor ->
+            val columnIndex = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DATA)
+            cursor.moveToFirst()
+            return cursor.getString(columnIndex)
+        }
+        
+        return null
+    }
+    
+    private fun getFileName(uri: Uri): String {
+        var fileName = "audio_file"
+        contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+            if (cursor.moveToFirst()) {
+                val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                if (nameIndex >= 0) {
+                    fileName = cursor.getString(nameIndex)
+                }
+            }
+        }
+        return fileName
     }
     
     private fun checkPermissions() {
@@ -71,14 +143,17 @@ class MainActivity : AppCompatActivity() {
         val pauseText = etPause.text.toString()
         
         if (filePath.isEmpty()) {
-            tvStatus.text = "Укажите полный путь к MP3 файлу"
+            tvStatus.text = "Сначала выберите файл"
+            Toast.makeText(this, "Нажмите 'Выбрать файл'", Toast.LENGTH_SHORT).show()
             return
         }
         
+        // Проверяем существование файла
         val file = File(filePath)
         if (!file.exists()) {
-            tvStatus.text = "Файл не найден: $filePath"
-            Toast.makeText(this, "Файл не существует!", Toast.LENGTH_LONG).show()
+            tvStatus.text = "Файл не найден, выберите заново"
+            Toast.makeText(this, "Файл не существует! Выберите другой", Toast.LENGTH_LONG).show()
+            selectAudioFile()
             return
         }
         
@@ -90,7 +165,7 @@ class MainActivity : AppCompatActivity() {
         
         startPlayback()
         
-        tvStatus.text = "▶ Воспроизведение: ${file.name}"
+        tvStatus.text = "▶ ${file.name}"
         Toast.makeText(this, "Воспроизведение: ${file.name}", Toast.LENGTH_SHORT).show()
     }
     
@@ -106,7 +181,6 @@ class MainActivity : AppCompatActivity() {
                 start()
             }
             
-            // Запускаем отслеживание окончания трека
             startMonitoringPlayback()
             
         } catch (e: Exception) {
@@ -118,7 +192,6 @@ class MainActivity : AppCompatActivity() {
     }
     
     private fun startMonitoringPlayback() {
-        // Отменяем предыдущий мониторинг
         checkPositionRunnable?.let { handler.removeCallbacks(it) }
         
         checkPositionRunnable = object : Runnable {
@@ -127,13 +200,10 @@ class MainActivity : AppCompatActivity() {
                 
                 val player = mediaPlayer
                 if (player != null && player.isPlaying) {
-                    // Трек еще играет, проверяем через 100 мс
                     handler.postDelayed(this, 100)
                 } else if (player != null && !player.isPlaying && player.currentPosition > 0) {
-                    // Трек закончился (больше не играет, но позиция была >0)
-                    tvStatus.text = "⏸ Пауза ${currentPauseSeconds} сек..."
+                    tvStatus.text = "⏸ Пауза $currentPauseSeconds сек..."
                     
-                    // Планируем повтор через заданную паузу
                     handler.postDelayed({
                         if (isPlaying) {
                             tvStatus.text = "▶ Воспроизведение..."
@@ -141,7 +211,6 @@ class MainActivity : AppCompatActivity() {
                         }
                     }, currentPauseSeconds * 1000)
                 } else {
-                    // Если плеер нулевой или позиция 0 - продолжаем проверять
                     handler.postDelayed(this, 100)
                 }
             }
@@ -153,19 +222,13 @@ class MainActivity : AppCompatActivity() {
     private fun stopPlaying() {
         isPlaying = false
         
-        // Останавливаем мониторинг
         checkPositionRunnable?.let { handler.removeCallbacks(it) }
         checkPositionRunnable = null
-        
-        // Останавливаем запланированные паузы
         handler.removeCallbacksAndMessages(null)
         
-        // Останавливаем плеер
         mediaPlayer?.let {
             try {
-                if (it.isPlaying) {
-                    it.stop()
-                }
+                if (it.isPlaying) it.stop()
                 it.release()
             } catch (e: Exception) {
                 e.printStackTrace()
