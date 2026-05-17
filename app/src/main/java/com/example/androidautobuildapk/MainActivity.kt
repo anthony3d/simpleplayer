@@ -29,7 +29,7 @@ class MainActivity : AppCompatActivity() {
     private var isPlaying = false
     private var currentFilePath = ""
     private var currentPauseSeconds = 0L
-    private var isPausing = false
+    private var checkPositionRunnable: Runnable? = null
     
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -82,65 +82,85 @@ class MainActivity : AppCompatActivity() {
             return
         }
         
-        // Полная остановка текущего воспроизведения
-        if (mediaPlayer != null) {
-            stopPlaying()
-        }
+        stopPlaying()
         
         currentFilePath = filePath
         currentPauseSeconds = pauseText.toLongOrNull() ?: 0
         isPlaying = true
-        isPausing = false
         
-        // Запускаем воспроизведение
-        playWithLoop()
+        startPlayback()
         
-        tvStatus.text = "Играет: ${file.name} (пауза ${currentPauseSeconds}с)"
+        tvStatus.text = "▶ Воспроизведение: ${file.name}"
         Toast.makeText(this, "Воспроизведение: ${file.name}", Toast.LENGTH_SHORT).show()
     }
     
-    private fun playWithLoop() {
+    private fun startPlayback() {
         if (!isPlaying) return
         
         try {
+            mediaPlayer?.release()
             mediaPlayer = MediaPlayer().apply {
                 setDataSource(currentFilePath)
                 prepare()
                 setVolume(1.0f, 1.0f)
-                setOnCompletionListener {
-                    if (isPlaying && !isPausing) {
-                        isPausing = true
-                        runOnUiThread {
-                            tvStatus.text = "Пауза ${currentPauseSeconds} сек..."
-                        }
-                        
-                        // Ждем указанное количество секунд
-                        handler.postDelayed({
-                            if (isPlaying) {
-                                // Перезапускаем
-                                isPausing = false
-                                mediaPlayer?.reset()
-                                playWithLoop()
-                            }
-                        }, currentPauseSeconds * 1000)
-                    }
-                }
                 start()
             }
+            
+            // Запускаем отслеживание окончания трека
+            startMonitoringPlayback()
+            
         } catch (e: Exception) {
             e.printStackTrace()
-            runOnUiThread {
-                tvStatus.text = "Ошибка: ${e.message}"
-                Toast.makeText(this, "Ошибка: ${e.message}", Toast.LENGTH_LONG).show()
-            }
+            tvStatus.text = "Ошибка: ${e.message}"
+            Toast.makeText(this, "Ошибка: ${e.message}", Toast.LENGTH_LONG).show()
             isPlaying = false
         }
     }
     
+    private fun startMonitoringPlayback() {
+        // Отменяем предыдущий мониторинг
+        checkPositionRunnable?.let { handler.removeCallbacks(it) }
+        
+        checkPositionRunnable = object : Runnable {
+            override fun run() {
+                if (!isPlaying) return
+                
+                val player = mediaPlayer
+                if (player != null && player.isPlaying) {
+                    // Трек еще играет, проверяем через 100 мс
+                    handler.postDelayed(this, 100)
+                } else if (player != null && !player.isPlaying && player.currentPosition > 0) {
+                    // Трек закончился (больше не играет, но позиция была >0)
+                    tvStatus.text = "⏸ Пауза ${currentPauseSeconds} сек..."
+                    
+                    // Планируем повтор через заданную паузу
+                    handler.postDelayed({
+                        if (isPlaying) {
+                            tvStatus.text = "▶ Воспроизведение..."
+                            startPlayback()
+                        }
+                    }, currentPauseSeconds * 1000)
+                } else {
+                    // Если плеер нулевой или позиция 0 - продолжаем проверять
+                    handler.postDelayed(this, 100)
+                }
+            }
+        }
+        
+        handler.post(checkPositionRunnable!!)
+    }
+    
     private fun stopPlaying() {
         isPlaying = false
-        isPausing = false
+        
+        // Останавливаем мониторинг
+        checkPositionRunnable?.let { handler.removeCallbacks(it) }
+        checkPositionRunnable = null
+        
+        // Останавливаем запланированные паузы
         handler.removeCallbacksAndMessages(null)
+        
+        // Останавливаем плеер
         mediaPlayer?.let {
             try {
                 if (it.isPlaying) {
@@ -152,7 +172,8 @@ class MainActivity : AppCompatActivity() {
             }
         }
         mediaPlayer = null
-        tvStatus.text = "Остановлено"
+        
+        tvStatus.text = "⏹ Остановлено"
     }
     
     override fun onDestroy() {
