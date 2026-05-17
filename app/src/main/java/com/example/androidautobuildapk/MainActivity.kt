@@ -1,14 +1,19 @@
 package com.example.simpleplayer
 
 import android.Manifest
+import android.content.ContentValues
 import android.content.pm.PackageManager
 import android.media.MediaPlayer
+import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.provider.MediaStore
 import android.widget.Button
 import android.widget.EditText
 import android.widget.TextView
+import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
@@ -25,6 +30,7 @@ class MainActivity : AppCompatActivity() {
     private var mediaPlayer: MediaPlayer? = null
     private val handler = Handler(Looper.getMainLooper())
     private var isPlaying = false
+    private var currentFilePath = ""
     
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -36,20 +42,29 @@ class MainActivity : AppCompatActivity() {
         btnStop = findViewById(R.id.btnStop)
         tvStatus = findViewById(R.id.tvStatus)
         
-        etPath.setText("/storage/emulated/0/Music/song.mp3")
+        // Примеры правильных путей
+        etPath.setText("/storage/emulated/0/Download/song.mp3")
         etPause.setText("2")
         
         btnPlay.setOnClickListener { startPlaying() }
         btnStop.setOnClickListener { stopPlaying() }
         
-        checkPermission()
+        checkPermissions()
     }
     
-    private fun checkPermission() {
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE)
-            != PackageManager.PERMISSION_GRANTED) {
-            ActivityCompat.requestPermissions(this, 
-                arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE), 1)
+    private fun checkPermissions() {
+        val permissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            arrayOf(Manifest.permission.READ_MEDIA_AUDIO)
+        } else {
+            arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
+        }
+        
+        val missingPermissions = permissions.filter {
+            ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
+        }.toTypedArray()
+        
+        if (missingPermissions.isNotEmpty()) {
+            ActivityCompat.requestPermissions(this, missingPermissions, 1)
         }
     }
     
@@ -64,17 +79,20 @@ class MainActivity : AppCompatActivity() {
         
         val file = File(filePath)
         if (!file.exists()) {
-            tvStatus.text = "Файл не найден: $filePath"
+            tvStatus.text = "Файл не найден: $filePath\nПроверьте путь"
+            Toast.makeText(this, "Файл не существует!", Toast.LENGTH_LONG).show()
             return
         }
         
         stopPlaying()
+        currentFilePath = filePath
         isPlaying = true
         
         val pauseSeconds = pauseText.toLongOrNull() ?: 0
         playWithLoop(filePath, pauseSeconds)
         
         tvStatus.text = "Играет: ${file.name} (пауза ${pauseSeconds}с)"
+        Toast.makeText(this, "Воспроизведение: ${file.name}", Toast.LENGTH_SHORT).show()
     }
     
     private fun playWithLoop(filePath: String, delaySeconds: Long) {
@@ -85,9 +103,12 @@ class MainActivity : AppCompatActivity() {
             mediaPlayer = MediaPlayer().apply {
                 setDataSource(filePath)
                 prepare()
+                setVolume(1.0f, 1.0f)  // Максимальная громкость
                 setOnCompletionListener {
                     if (isPlaying) {
-                        tvStatus.text = "Пауза ${delaySeconds} сек..."
+                        runOnUiThread {
+                            tvStatus.text = "Пауза ${delaySeconds} сек..."
+                        }
                         handler.postDelayed({
                             playWithLoop(filePath, delaySeconds)
                         }, delaySeconds * 1000)
@@ -96,7 +117,11 @@ class MainActivity : AppCompatActivity() {
                 start()
             }
         } catch (e: Exception) {
-            tvStatus.text = "Ошибка: ${e.message}"
+            e.printStackTrace()
+            runOnUiThread {
+                tvStatus.text = "Ошибка: ${e.message}"
+                Toast.makeText(this, "Ошибка: ${e.message}", Toast.LENGTH_LONG).show()
+            }
             isPlaying = false
         }
     }
@@ -105,8 +130,12 @@ class MainActivity : AppCompatActivity() {
         isPlaying = false
         handler.removeCallbacksAndMessages(null)
         mediaPlayer?.let {
-            if (it.isPlaying) it.stop()
-            it.release()
+            try {
+                if (it.isPlaying) it.stop()
+                it.release()
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
         }
         mediaPlayer = null
         tvStatus.text = "Остановлено"
