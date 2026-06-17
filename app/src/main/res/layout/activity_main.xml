@@ -12,7 +12,70 @@
         android:text="MP3 Цикл-Плеер"
         android:textSize="24sp"
         android:textStyle="bold"
-        android:layout_marginBottom="30dp"/>
+        android:layout_marginBottom="20dp"/>
+
+    <!-- Имя файла -->
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Файл:"
+        android:textSize="14sp"
+        android:textStyle="bold"
+        android:layout_marginBottom="5dp"/>
+
+    <TextView
+        android:id="@+id/tvFileName"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="-"
+        android:textSize="16sp"
+        android:textStyle="bold"
+        android:background="#f0f0f0"
+        android:padding="10dp"
+        android:layout_marginBottom="15dp"/>
+
+    <!-- Блок с тегами -->
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Теги:"
+        android:textSize="14sp"
+        android:textStyle="bold"
+        android:layout_marginBottom="5dp"/>
+
+    <LinearLayout
+        android:id="@+id/tagsContainer"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:background="#f0f0f0"
+        android:padding="10dp"
+        android:layout_marginBottom="15dp">
+        
+        <TextView
+            android:id="@+id/tvNoTags"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Теги отсутствуют"
+            android:textSize="14sp"
+            android:gravity="center"/>
+    </LinearLayout>
+
+    <!-- История треков -->
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="История (до 5 треков)"
+        android:textSize="14sp"
+        android:textStyle="bold"
+        android:layout_marginBottom="5dp"/>
+
+    <LinearLayout
+        android:id="@+id/historyContainer"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:layout_marginBottom="15dp"/>
 
     <Button
         android:id="@+id/btnSelect"
@@ -20,17 +83,7 @@
         android:layout_height="wrap_content"
         android:text="📁 Выбрать MP3 файл"
         android:textSize="16sp"
-        android:layout_marginBottom="15dp"/>
-
-    <EditText
-        android:id="@+id/etFileName"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:hint="Выбранный файл"
-        android:inputType="text"
-        android:layout_marginBottom="10dp"
-        android:enabled="false"
-        android:textColor="#666"/>
+        android:layout_marginBottom="10dp"/>
 
     <EditText
         android:id="@+id/etPause"
