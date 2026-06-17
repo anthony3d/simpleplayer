@@ -159,7 +159,6 @@ class MainActivity : AppCompatActivity() {
                 val tag = audioFile.tag
                 
                 if (tag != null) {
-                    // Читаем все доступные теги
                     tag.getFirst(FieldKey.TITLE)?.let { if (it.isNotEmpty()) tags["Название"] = it }
                     tag.getFirst(FieldKey.ARTIST)?.let { if (it.isNotEmpty()) tags["Исполнитель"] = it }
                     tag.getFirst(FieldKey.ALBUM)?.let { if (it.isNotEmpty()) tags["Альбом"] = it }
@@ -362,9 +361,11 @@ class MainActivity : AppCompatActivity() {
             editor.putString("history_${index}_name", track.fileName)
             
             editor.putInt("history_${index}_tags_count", track.tags.size)
-            track.tags.forEachIndexed { tagIndex, (key, value) ->
+            var tagIndex = 0
+            for ((key, value) in track.tags) {
                 editor.putString("history_${index}_tag_${tagIndex}_key", key)
                 editor.putString("history_${index}_tag_${tagIndex}_value", value)
+                tagIndex++
             }
         }
         editor.apply()
