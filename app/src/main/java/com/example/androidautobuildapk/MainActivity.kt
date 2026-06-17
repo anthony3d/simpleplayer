@@ -2,6 +2,7 @@ package com.example.simpleplayer
 
 import android.Manifest
 import android.content.Intent
+import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.media.MediaPlayer
 import android.net.Uri
@@ -12,20 +13,27 @@ import android.os.Looper
 import android.provider.OpenableColumns
 import android.widget.Button
 import android.widget.EditText
+import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import com.github.agraven.androidid3taglibrary.ID3TagReader
+import java.io.File
+import java.io.FileInputStream
 
 class MainActivity : AppCompatActivity() {
     
-    private lateinit var etFileName: EditText
     private lateinit var etPause: EditText
     private lateinit var btnPlay: Button
     private lateinit var btnStop: Button
     private lateinit var btnSelect: Button
     private lateinit var tvStatus: TextView
+    private lateinit var tvFileName: TextView
+    private lateinit var tagsContainer: LinearLayout
+    private lateinit var tvNoTags: TextView
+    private lateinit var historyContainer: LinearLayout
     
     private var mediaPlayer: MediaPlayer? = null
     private val handler = Handler(Looper.getMainLooper())
@@ -34,19 +42,35 @@ class MainActivity : AppCompatActivity() {
     private var currentPauseSeconds = 0L
     private var checkPositionRunnable: Runnable? = null
     private var currentFileName = ""
+    private var currentFilePath: String? = null
     
     private val PICK_AUDIO_FILE = 1000
+    private val MAX_HISTORY = 5
+    
+    private lateinit var prefs: SharedPreferences
+    private val historyList = mutableListOf<TrackInfo>()
+    
+    data class TrackInfo(
+        val uri: String,
+        val fileName: String,
+        val tags: Map<String, String>
+    )
     
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
         
-        etFileName = findViewById(R.id.etFileName)
         etPause = findViewById(R.id.etPause)
         btnPlay = findViewById(R.id.btnPlay)
         btnStop = findViewById(R.id.btnStop)
         btnSelect = findViewById(R.id.btnSelect)
         tvStatus = findViewById(R.id.tvStatus)
+        tvFileName = findViewById(R.id.tvFileName)
+        tagsContainer = findViewById(R.id.tagsContainer)
+        tvNoTags = findViewById(R.id.tvNoTags)
+        historyContainer = findViewById(R.id.historyContainer)
+        
+        prefs = getSharedPreferences("player_prefs", MODE_PRIVATE)
         
         etPause.setText("2")
         
@@ -55,6 +79,9 @@ class MainActivity : AppCompatActivity() {
         btnStop.setOnClickListener { stopPlaying() }
         
         checkPermissions()
+        
+        loadHistory()
+        updateHistoryUI()
     }
     
     private fun selectAudioFile() {
@@ -70,30 +97,47 @@ class MainActivity : AppCompatActivity() {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode == PICK_AUDIO_FILE && resultCode == RESULT_OK) {
             data?.data?.let { uri ->
-                // Сохраняем URI
                 currentUri = uri
                 
-                // Получаем持久ный доступ к файлу
                 try {
                     contentResolver.takePersistableUriPermission(
-                        uri, 
+                        uri,
                         Intent.FLAG_GRANT_READ_URI_PERMISSION
                     )
                 } catch (e: Exception) {
-                    // Некоторые версии Android не поддерживают это
                     e.printStackTrace()
                 }
                 
-                // Получаем имя файла
                 currentFileName = getFileName(uri)
-                etFileName.setText(currentFileName)
+                currentFilePath = getFilePathFromUri(uri)
+                
+                // Обновляем отображение
+                tvFileName.text = currentFileName
+                
+                // Читаем теги
+                val tags = readAllTags(uri)
+                displayTags(tags)
+                
+                // Добавляем в историю
+                addToHistory(TrackInfo(
+                    uri = uri.toString(),
+                    fileName = currentFileName,
+                    tags = tags
+                ))
+                
                 tvStatus.text = "Выбран: $currentFileName"
                 Toast.makeText(this, "Файл выбран: $currentFileName", Toast.LENGTH_SHORT).show()
                 
-                // Останавливаем воспроизведение если что-то играло
                 stopPlaying()
             }
         }
+    }
+    
+    private fun getFilePathFromUri(uri: Uri): String? {
+        if (uri.scheme == "file") {
+            return uri.path
+        }
+        return null
     }
     
     private fun getFileName(uri: Uri): String {
@@ -107,6 +151,68 @@ class MainActivity : AppCompatActivity() {
             }
         }
         return fileName
+    }
+    
+    private fun readAllTags(uri: Uri): Map<String, String> {
+        val tags = mutableMapOf<String, String>()
+        
+        try {
+            if (currentFilePath != null && File(currentFilePath).exists()) {
+                val inputStream = FileInputStream(currentFilePath)
+                val id3Tags = ID3TagReader.readTags(inputStream)
+                
+                // Читаем все доступные теги
+                id3Tags.title?.let { if (it.isNotEmpty()) tags["Название"] = it }
+                id3Tags.artist?.let { if (it.isNotEmpty()) tags["Исполнитель"] = it }
+                id3Tags.album?.let { if (it.isNotEmpty()) tags["Альбом"] = it }
+                id3Tags.year?.let { if (it.isNotEmpty()) tags["Год"] = it }
+                id3Tags.genre?.let { if (it.isNotEmpty()) tags["Жанр"] = it }
+                id3Tags.comment?.let { if (it.isNotEmpty()) tags["Комментарий"] = it }
+                id3Tags.track?.let { if (it.isNotEmpty()) tags["Трек"] = it }
+                id3Tags.composer?.let { if (it.isNotEmpty()) tags["Композитор"] = it }
+                id3Tags.copyright?.let { if (it.isNotEmpty()) tags["Авторские права"] = it }
+                id3Tags.albumArtist?.let { if (it.isNotEmpty()) tags["Исполнитель альбома"] = it }
+                id3Tags.grouping?.let { if (it.isNotEmpty()) tags["Группировка"] = it }
+                id3Tags.discNumber?.let { if (it.isNotEmpty()) tags["Номер диска"] = it }
+                id3Tags.bpm?.let { if (it.isNotEmpty()) tags["BPM"] = it }
+                
+                // Если есть другие поля, можно добавить через raw
+                // id3Tags.additionalFields?.forEach { (key, value) ->
+                //     if (value.isNotEmpty()) tags[key] = value
+                // }
+                
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+        
+        return tags
+    }
+    
+    private fun displayTags(tags: Map<String, String>) {
+        // Очищаем контейнер
+        tagsContainer.removeAllViews()
+        
+        if (tags.isEmpty()) {
+            tvNoTags.visibility = TextView.VISIBLE
+            return
+        }
+        
+        tvNoTags.visibility = TextView.GONE
+        
+        // Сортируем теги для удобства (сначала название, исполнитель, альбом)
+        val sortedKeys = listOf("Название", "Исполнитель", "Альбом") + 
+                         tags.keys.filter { it !in listOf("Название", "Исполнитель", "Альбом") }.sorted()
+        
+        for (key in sortedKeys) {
+            val value = tags[key] ?: continue
+            val tv = TextView(this).apply {
+                text = "$key: $value"
+                textSize = 14f
+                setPadding(5, 3, 5, 3)
+            }
+            tagsContainer.addView(tv)
+        }
     }
     
     private fun checkPermissions() {
@@ -176,10 +282,8 @@ class MainActivity : AppCompatActivity() {
                 
                 val player = mediaPlayer
                 if (player != null && player.isPlaying) {
-                    // Трек играет, продолжаем проверять
                     handler.postDelayed(this, 100)
                 } else if (player != null && !player.isPlaying && player.currentPosition > 0) {
-                    // Трек закончился
                     runOnUiThread {
                         tvStatus.text = "⏸ Пауза $currentPauseSeconds сек..."
                     }
@@ -193,7 +297,6 @@ class MainActivity : AppCompatActivity() {
                         }
                     }, currentPauseSeconds * 1000)
                 } else {
-                    // Продолжаем проверять
                     handler.postDelayed(this, 100)
                 }
             }
@@ -222,6 +325,125 @@ class MainActivity : AppCompatActivity() {
         runOnUiThread {
             tvStatus.text = "⏹ Остановлено"
         }
+    }
+    
+    // ==================== ИСТОРИЯ ====================
+    
+    private fun addToHistory(track: TrackInfo) {
+        historyList.removeAll { it.uri == track.uri }
+        historyList.add(0, track)
+        while (historyList.size > MAX_HISTORY) {
+            historyList.removeAt(historyList.lastIndex)
+        }
+        saveHistory()
+        updateHistoryUI()
+    }
+    
+    private fun loadHistory() {
+        historyList.clear()
+        val count = prefs.getInt("history_count", 0)
+        for (i in 0 until count) {
+            val uri = prefs.getString("history_${i}_uri", "") ?: ""
+            val fileName = prefs.getString("history_${i}_name", "") ?: ""
+            if (uri.isNotEmpty()) {
+                // Загружаем теги
+                val tags = mutableMapOf<String, String>()
+                val tagsCount = prefs.getInt("history_${i}_tags_count", 0)
+                for (j in 0 until tagsCount) {
+                    val key = prefs.getString("history_${i}_tag_${j}_key", "") ?: ""
+                    val value = prefs.getString("history_${i}_tag_${j}_value", "") ?: ""
+                    if (key.isNotEmpty() && value.isNotEmpty()) {
+                        tags[key] = value
+                    }
+                }
+                historyList.add(TrackInfo(uri, fileName, tags))
+            }
+        }
+    }
+    
+    private fun saveHistory() {
+        val editor = prefs.edit()
+        editor.putInt("history_count", historyList.size)
+        historyList.forEachIndexed { index, track ->
+            editor.putString("history_${index}_uri", track.uri)
+            editor.putString("history_${index}_name", track.fileName)
+            
+            // Сохраняем теги
+            editor.putInt("history_${index}_tags_count", track.tags.size)
+            track.tags.forEachIndexed { tagIndex, (key, value) ->
+                editor.putString("history_${index}_tag_${tagIndex}_key", key)
+                editor.putString("history_${index}_tag_${tagIndex}_value", value)
+            }
+        }
+        editor.apply()
+    }
+    
+    private fun updateHistoryUI() {
+        historyContainer.removeAllViews()
+        
+        if (historyList.isEmpty()) {
+            val tv = TextView(this).apply {
+                text = "Нет истории"
+                textSize = 14f
+                setPadding(10, 10, 10, 10)
+            }
+            historyContainer.addView(tv)
+            return
+        }
+        
+        historyList.forEachIndexed { index, track ->
+            val itemView = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                setPadding(10, 10, 10, 10)
+                background = ContextCompat.getDrawable(this@MainActivity, android.R.drawable.btn_default)
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                )
+            }
+            
+            // Только имя файла в истории
+            val infoText = TextView(this).apply {
+                text = "${index + 1}. ${track.fileName}"
+                textSize = 14f
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                setPadding(10, 5, 10, 5)
+            }
+            
+            val playBtn = Button(this).apply {
+                text = "▶"
+                setOnClickListener {
+                    loadTrackFromHistory(index)
+                }
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                )
+            }
+            
+            addView(infoText)
+            addView(playBtn)
+            
+            historyContainer.addView(itemView)
+        }
+    }
+    
+    private fun loadTrackFromHistory(index: Int) {
+        if (index < 0 || index >= historyList.size) return
+        
+        val track = historyList[index]
+        currentUri = Uri.parse(track.uri)
+        currentFileName = track.fileName
+        
+        // Обновляем отображение
+        tvFileName.text = currentFileName
+        displayTags(track.tags)
+        
+        tvStatus.text = "Загружен: $currentFileName"
+        Toast.makeText(this, "Загружен: $currentFileName", Toast.LENGTH_SHORT).show()
+        
+        stopPlaying()
+        startPlaying()
     }
     
     override fun onDestroy() {
