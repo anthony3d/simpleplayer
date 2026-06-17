@@ -19,7 +19,7 @@ import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
-import com.github.agraven.androidid3taglibrary.ID3TagReader
+import com.mpatric.mp3agic.Mp3File
 import java.io.File
 import java.io.FileInputStream
 
@@ -115,7 +115,7 @@ class MainActivity : AppCompatActivity() {
                 tvFileName.text = currentFileName
                 
                 // Читаем теги
-                val tags = readAllTags(uri)
+                val tags = readAllTags()
                 displayTags(tags)
                 
                 // Добавляем в историю
@@ -153,34 +153,43 @@ class MainActivity : AppCompatActivity() {
         return fileName
     }
     
-    private fun readAllTags(uri: Uri): Map<String, String> {
+    private fun readAllTags(): Map<String, String> {
         val tags = mutableMapOf<String, String>()
         
         try {
             if (currentFilePath != null && File(currentFilePath).exists()) {
-                val inputStream = FileInputStream(currentFilePath)
-                val id3Tags = ID3TagReader.readTags(inputStream)
+                val mp3file = Mp3File(currentFilePath)
                 
-                // Читаем все доступные теги
-                id3Tags.title?.let { if (it.isNotEmpty()) tags["Название"] = it }
-                id3Tags.artist?.let { if (it.isNotEmpty()) tags["Исполнитель"] = it }
-                id3Tags.album?.let { if (it.isNotEmpty()) tags["Альбом"] = it }
-                id3Tags.year?.let { if (it.isNotEmpty()) tags["Год"] = it }
-                id3Tags.genre?.let { if (it.isNotEmpty()) tags["Жанр"] = it }
-                id3Tags.comment?.let { if (it.isNotEmpty()) tags["Комментарий"] = it }
-                id3Tags.track?.let { if (it.isNotEmpty()) tags["Трек"] = it }
-                id3Tags.composer?.let { if (it.isNotEmpty()) tags["Композитор"] = it }
-                id3Tags.copyright?.let { if (it.isNotEmpty()) tags["Авторские права"] = it }
-                id3Tags.albumArtist?.let { if (it.isNotEmpty()) tags["Исполнитель альбома"] = it }
-                id3Tags.grouping?.let { if (it.isNotEmpty()) tags["Группировка"] = it }
-                id3Tags.discNumber?.let { if (it.isNotEmpty()) tags["Номер диска"] = it }
-                id3Tags.bpm?.let { if (it.isNotEmpty()) tags["BPM"] = it }
-                
-                // Если есть другие поля, можно добавить через raw
-                // id3Tags.additionalFields?.forEach { (key, value) ->
-                //     if (value.isNotEmpty()) tags[key] = value
-                // }
-                
+                if (mp3file.hasId3v2Tag()) {
+                    val tag = mp3file.id3v2Tag
+                    
+                    // Читаем все доступные теги
+                    tag.getTitle()?.let { if (it.isNotEmpty()) tags["Название"] = it }
+                    tag.getArtist()?.let { if (it.isNotEmpty()) tags["Исполнитель"] = it }
+                    tag.getAlbum()?.let { if (it.isNotEmpty()) tags["Альбом"] = it }
+                    tag.getYear()?.let { if (it.isNotEmpty()) tags["Год"] = it }
+                    tag.getGenre()?.let { if (it.isNotEmpty()) tags["Жанр"] = it }
+                    tag.getComment()?.let { if (it.isNotEmpty()) tags["Комментарий"] = it }
+                    tag.getTrack()?.let { if (it.isNotEmpty()) tags["Трек"] = it }
+                    tag.getComposer()?.let { if (it.isNotEmpty()) tags["Композитор"] = it }
+                    tag.getAlbumArtist()?.let { if (it.isNotEmpty()) tags["Исполнитель альбома"] = it }
+                    tag.getDiscNumber()?.let { if (it.isNotEmpty()) tags["Номер диска"] = it }
+                    tag.getCompilation()?.let { if (it.isNotEmpty()) tags["Компиляция"] = it }
+                    
+                    // Читаем дополнительные поля если есть
+                    tag.getGenreDescription()?.let { if (it.isNotEmpty() && !tags.containsKey("Жанр")) tags["Жанр"] = it }
+                    
+                } else if (mp3file.hasId3v1Tag()) {
+                    val tag = mp3file.id3v1Tag
+                    
+                    tag.getTitle()?.let { if (it.isNotEmpty()) tags["Название"] = it }
+                    tag.getArtist()?.let { if (it.isNotEmpty()) tags["Исполнитель"] = it }
+                    tag.getAlbum()?.let { if (it.isNotEmpty()) tags["Альбом"] = it }
+                    tag.getYear()?.let { if (it.isNotEmpty()) tags["Год"] = it }
+                    tag.getGenre()?.let { if (it.isNotEmpty()) tags["Жанр"] = it }
+                    tag.getComment()?.let { if (it.isNotEmpty()) tags["Комментарий"] = it }
+                    tag.getTrack()?.let { if (it.isNotEmpty()) tags["Трек"] = it }
+                }
             }
         } catch (e: Exception) {
             e.printStackTrace()
@@ -190,7 +199,6 @@ class MainActivity : AppCompatActivity() {
     }
     
     private fun displayTags(tags: Map<String, String>) {
-        // Очищаем контейнер
         tagsContainer.removeAllViews()
         
         if (tags.isEmpty()) {
@@ -200,9 +208,10 @@ class MainActivity : AppCompatActivity() {
         
         tvNoTags.visibility = TextView.GONE
         
-        // Сортируем теги для удобства (сначала название, исполнитель, альбом)
-        val sortedKeys = listOf("Название", "Исполнитель", "Альбом") + 
-                         tags.keys.filter { it !in listOf("Название", "Исполнитель", "Альбом") }.sorted()
+        // Сортируем теги (сначала основные)
+        val priorityKeys = listOf("Название", "Исполнитель", "Альбом")
+        val sortedKeys = priorityKeys.filter { it in tags.keys } + 
+                         tags.keys.filter { it !in priorityKeys }.sorted()
         
         for (key in sortedKeys) {
             val value = tags[key] ?: continue
@@ -346,7 +355,6 @@ class MainActivity : AppCompatActivity() {
             val uri = prefs.getString("history_${i}_uri", "") ?: ""
             val fileName = prefs.getString("history_${i}_name", "") ?: ""
             if (uri.isNotEmpty()) {
-                // Загружаем теги
                 val tags = mutableMapOf<String, String>()
                 val tagsCount = prefs.getInt("history_${i}_tags_count", 0)
                 for (j in 0 until tagsCount) {
@@ -368,7 +376,6 @@ class MainActivity : AppCompatActivity() {
             editor.putString("history_${index}_uri", track.uri)
             editor.putString("history_${index}_name", track.fileName)
             
-            // Сохраняем теги
             editor.putInt("history_${index}_tags_count", track.tags.size)
             track.tags.forEachIndexed { tagIndex, (key, value) ->
                 editor.putString("history_${index}_tag_${tagIndex}_key", key)
@@ -402,7 +409,6 @@ class MainActivity : AppCompatActivity() {
                 )
             }
             
-            // Только имя файла в истории
             val infoText = TextView(this).apply {
                 text = "${index + 1}. ${track.fileName}"
                 textSize = 14f
@@ -435,7 +441,6 @@ class MainActivity : AppCompatActivity() {
         currentUri = Uri.parse(track.uri)
         currentFileName = track.fileName
         
-        // Обновляем отображение
         tvFileName.text = currentFileName
         displayTags(track.tags)
         
