@@ -171,10 +171,10 @@ class MainActivity : AppCompatActivity() {
                     tag.getFirst(FieldKey.ALBUM_ARTIST)?.let { if (it.isNotEmpty()) tags["Исполнитель альбома"] = it }
                     tag.getFirst(FieldKey.DISC_NO)?.let { if (it.isNotEmpty()) tags["Номер диска"] = it }
                     tag.getFirst(FieldKey.LYRICS)?.let { if (it.isNotEmpty()) tags["Текст"] = it }
-                    tag.getFirst(FieldKey.COPYRIGHT)?.let { if (it.isNotEmpty()) tags["Авторские права"] = it }
-                    tag.getFirst(FieldKey.ENCODER)?.let { if (it.isNotEmpty()) tags["Кодировщик"] = it }
-                    tag.getFirst(FieldKey.BPM)?.let { if (it.isNotEmpty()) tags["BPM"] = it }
-                    tag.getFirst(FieldKey.GROUPING)?.let { if (it.isNotEmpty()) tags["Группировка"] = it }
+                    // tag.getFirst(FieldKey.COPYRIGHT)?.let { if (it.isNotEmpty()) tags["Авторские права"] = it }
+                    // tag.getFirst(FieldKey.ENCODER)?.let { if (it.isNotEmpty()) tags["Кодировщик"] = it }
+                    // tag.getFirst(FieldKey.BPM)?.let { if (it.isNotEmpty()) tags["BPM"] = it }
+                    // tag.getFirst(FieldKey.GROUPING)?.let { if (it.isNotEmpty()) tags["Группировка"] = it }
                 }
             }
         } catch (e: Exception) {
