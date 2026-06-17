@@ -19,9 +19,9 @@ import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
-import com.mpatric.mp3agic.Mp3File
+import org.jaudiotagger.audio.AudioFileIO
+import org.jaudiotagger.tag.FieldKey
 import java.io.File
-import java.io.FileInputStream
 
 class MainActivity : AppCompatActivity() {
     
@@ -111,14 +111,11 @@ class MainActivity : AppCompatActivity() {
                 currentFileName = getFileName(uri)
                 currentFilePath = getFilePathFromUri(uri)
                 
-                // Обновляем отображение
                 tvFileName.text = currentFileName
                 
-                // Читаем теги
                 val tags = readAllTags()
                 displayTags(tags)
                 
-                // Добавляем в историю
                 addToHistory(TrackInfo(
                     uri = uri.toString(),
                     fileName = currentFileName,
@@ -158,37 +155,26 @@ class MainActivity : AppCompatActivity() {
         
         try {
             if (currentFilePath != null && File(currentFilePath).exists()) {
-                val mp3file = Mp3File(currentFilePath)
+                val audioFile = AudioFileIO.read(File(currentFilePath))
+                val tag = audioFile.tag
                 
-                if (mp3file.hasId3v2Tag()) {
-                    val tag = mp3file.id3v2Tag
-                    
+                if (tag != null) {
                     // Читаем все доступные теги
-                    tag.getTitle()?.let { if (it.isNotEmpty()) tags["Название"] = it }
-                    tag.getArtist()?.let { if (it.isNotEmpty()) tags["Исполнитель"] = it }
-                    tag.getAlbum()?.let { if (it.isNotEmpty()) tags["Альбом"] = it }
-                    tag.getYear()?.let { if (it.isNotEmpty()) tags["Год"] = it }
-                    tag.getGenre()?.let { if (it.isNotEmpty()) tags["Жанр"] = it }
-                    tag.getComment()?.let { if (it.isNotEmpty()) tags["Комментарий"] = it }
-                    tag.getTrack()?.let { if (it.isNotEmpty()) tags["Трек"] = it }
-                    tag.getComposer()?.let { if (it.isNotEmpty()) tags["Композитор"] = it }
-                    tag.getAlbumArtist()?.let { if (it.isNotEmpty()) tags["Исполнитель альбома"] = it }
-                    tag.getDiscNumber()?.let { if (it.isNotEmpty()) tags["Номер диска"] = it }
-                    tag.getCompilation()?.let { if (it.isNotEmpty()) tags["Компиляция"] = it }
-                    
-                    // Читаем дополнительные поля если есть
-                    tag.getGenreDescription()?.let { if (it.isNotEmpty() && !tags.containsKey("Жанр")) tags["Жанр"] = it }
-                    
-                } else if (mp3file.hasId3v1Tag()) {
-                    val tag = mp3file.id3v1Tag
-                    
-                    tag.getTitle()?.let { if (it.isNotEmpty()) tags["Название"] = it }
-                    tag.getArtist()?.let { if (it.isNotEmpty()) tags["Исполнитель"] = it }
-                    tag.getAlbum()?.let { if (it.isNotEmpty()) tags["Альбом"] = it }
-                    tag.getYear()?.let { if (it.isNotEmpty()) tags["Год"] = it }
-                    tag.getGenre()?.let { if (it.isNotEmpty()) tags["Жанр"] = it }
-                    tag.getComment()?.let { if (it.isNotEmpty()) tags["Комментарий"] = it }
-                    tag.getTrack()?.let { if (it.isNotEmpty()) tags["Трек"] = it }
+                    tag.getFirst(FieldKey.TITLE)?.let { if (it.isNotEmpty()) tags["Название"] = it }
+                    tag.getFirst(FieldKey.ARTIST)?.let { if (it.isNotEmpty()) tags["Исполнитель"] = it }
+                    tag.getFirst(FieldKey.ALBUM)?.let { if (it.isNotEmpty()) tags["Альбом"] = it }
+                    tag.getFirst(FieldKey.YEAR)?.let { if (it.isNotEmpty()) tags["Год"] = it }
+                    tag.getFirst(FieldKey.GENRE)?.let { if (it.isNotEmpty()) tags["Жанр"] = it }
+                    tag.getFirst(FieldKey.COMMENT)?.let { if (it.isNotEmpty()) tags["Комментарий"] = it }
+                    tag.getFirst(FieldKey.TRACK)?.let { if (it.isNotEmpty()) tags["Трек"] = it }
+                    tag.getFirst(FieldKey.COMPOSER)?.let { if (it.isNotEmpty()) tags["Композитор"] = it }
+                    tag.getFirst(FieldKey.ALBUM_ARTIST)?.let { if (it.isNotEmpty()) tags["Исполнитель альбома"] = it }
+                    tag.getFirst(FieldKey.DISC_NO)?.let { if (it.isNotEmpty()) tags["Номер диска"] = it }
+                    tag.getFirst(FieldKey.LYRICS)?.let { if (it.isNotEmpty()) tags["Текст"] = it }
+                    tag.getFirst(FieldKey.COPYRIGHT)?.let { if (it.isNotEmpty()) tags["Авторские права"] = it }
+                    tag.getFirst(FieldKey.ENCODER)?.let { if (it.isNotEmpty()) tags["Кодировщик"] = it }
+                    tag.getFirst(FieldKey.BPM)?.let { if (it.isNotEmpty()) tags["BPM"] = it }
+                    tag.getFirst(FieldKey.GROUPING)?.let { if (it.isNotEmpty()) tags["Группировка"] = it }
                 }
             }
         } catch (e: Exception) {
@@ -208,7 +194,6 @@ class MainActivity : AppCompatActivity() {
         
         tvNoTags.visibility = TextView.GONE
         
-        // Сортируем теги (сначала основные)
         val priorityKeys = listOf("Название", "Исполнитель", "Альбом")
         val sortedKeys = priorityKeys.filter { it in tags.keys } + 
                          tags.keys.filter { it !in priorityKeys }.sorted()
