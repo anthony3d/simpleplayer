@@ -37,6 +37,44 @@
         android:textSize="16sp"
         android:layout_marginBottom="10dp"/>
 
+    <!-- Блок с тегами -->
+    <LinearLayout
+        android:id="@+id/layoutTags"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:background="#f5f5f5"
+        android:padding="10dp"
+        android:layout_marginBottom="10dp"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/tvArtist"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Artist: ---"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="2dp"/>
+
+        <TextView
+            android:id="@+id/tvTitle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Title: ---"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="2dp"/>
+
+        <TextView
+            android:id="@+id/tvAlbum"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Album: ---"
+            android:textSize="14sp"
+            android:textStyle="bold"/>
+    </LinearLayout>
+
     <TextView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
