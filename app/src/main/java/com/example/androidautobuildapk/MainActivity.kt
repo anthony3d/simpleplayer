@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
+import android.media.MediaMetadataRetriever
 import android.media.MediaPlayer
 import android.net.Uri
 import android.os.Build
@@ -32,6 +33,10 @@ class MainActivity : AppCompatActivity() {
     private lateinit var spinnerPause: Spinner
     private lateinit var lvHistory: ListView
     private lateinit var tvStatus: TextView
+    private lateinit var layoutTags: View
+    private lateinit var tvArtist: TextView
+    private lateinit var tvTitle: TextView
+    private lateinit var tvAlbum: TextView
     
     private var mediaPlayer: MediaPlayer? = null
     private val handler = Handler(Looper.getMainLooper())
@@ -57,6 +62,12 @@ class MainActivity : AppCompatActivity() {
         val pauseSeconds: Long
     )
     
+    data class AudioTags(
+        val artist: String,
+        val title: String,
+        val album: String
+    )
+    
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
@@ -66,6 +77,10 @@ class MainActivity : AppCompatActivity() {
         spinnerPause = findViewById(R.id.spinnerPause)
         lvHistory = findViewById(R.id.lvHistory)
         tvStatus = findViewById(R.id.tvStatus)
+        layoutTags = findViewById(R.id.layoutTags)
+        tvArtist = findViewById(R.id.tvArtist)
+        tvTitle = findViewById(R.id.tvTitle)
+        tvAlbum = findViewById(R.id.tvAlbum)
         
         sharedPrefs = getSharedPreferences("player_history", MODE_PRIVATE)
         
@@ -105,6 +120,7 @@ class MainActivity : AppCompatActivity() {
         checkPermissions()
         loadHistory()
         updatePlayStopButton()
+        clearTags()
     }
     
     private fun selectAudioFile() {
@@ -133,6 +149,11 @@ class MainActivity : AppCompatActivity() {
                 }
                 
                 currentFileName = getFileName(uri)
+                
+                // Извлекаем теги
+                val tags = extractTags(uri)
+                displayTags(tags)
+                
                 tvStatus.text = "Выбран: $currentFileName"
                 Toast.makeText(this, "Загружено: $currentFileName", Toast.LENGTH_SHORT).show()
                 
@@ -156,6 +177,50 @@ class MainActivity : AppCompatActivity() {
             }
         }
         return fileName
+    }
+    
+    // ============ ИЗВЛЕЧЕНИЕ ТЕГОВ ============
+    
+    private fun extractTags(uri: Uri): AudioTags {
+        var artist = "---"
+        var title = "---"
+        var album = "---"
+        
+        try {
+            val retriever = MediaMetadataRetriever()
+            retriever.setDataSource(this, uri)
+            
+            artist = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ARTIST) ?: "---"
+            title = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_TITLE) ?: "---"
+            album = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ALBUM) ?: "---"
+            
+            // Если заголовок не найден, используем имя файла
+            if (title == "---") {
+                title = currentFileName.removeSuffix(".mp3").removeSuffix(".MP3")
+            }
+            
+            retriever.release()
+            
+        } catch (e: Exception) {
+            e.printStackTrace()
+            // Если ошибка, оставляем значения по умолчанию
+        }
+        
+        return AudioTags(artist, title, album)
+    }
+    
+    private fun displayTags(tags: AudioTags) {
+        tvArtist.text = "🎤 ${tags.artist}"
+        tvTitle.text = "🎵 ${tags.title}"
+        tvAlbum.text = "💿 ${tags.album}"
+        layoutTags.visibility = View.VISIBLE
+    }
+    
+    private fun clearTags() {
+        tvArtist.text = "🎤 ---"
+        tvTitle.text = "🎵 ---"
+        tvAlbum.text = "💿 ---"
+        layoutTags.visibility = View.GONE
     }
     
     private fun checkPermissions() {
@@ -206,6 +271,10 @@ class MainActivity : AppCompatActivity() {
             currentUri = uri
             currentUriString = item.uriString
             currentFileName = item.fileName
+            
+            // Извлекаем и показываем теги
+            val tags = extractTags(uri)
+            displayTags(tags)
             
             // Устанавливаем паузу из истории
             val pauseIndex = PAUSE_VALUES.indexOf(item.pauseSeconds)
@@ -310,6 +379,12 @@ class MainActivity : AppCompatActivity() {
             return
         }
         
+        // Если теги еще не загружены, извлекаем их
+        if (layoutTags.visibility == View.GONE) {
+            val tags = extractTags(currentUri!!)
+            displayTags(tags)
+        }
+        
         stopPlaying()
         isPlaying = true
         
@@ -333,7 +408,6 @@ class MainActivity : AppCompatActivity() {
                 start()
             }
             
-            // Обновляем позицию активного трека
             currentPlayingPosition = historyList.indexOfFirst { it.uriString == currentUriString }
             updateHistoryUI()
             
