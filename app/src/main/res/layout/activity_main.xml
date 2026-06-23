@@ -3,63 +3,25 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
-    android:padding="16dp"
-    android:gravity="center_horizontal">
-
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:layout_marginBottom="10dp">
-
-        <Button
-            android:id="@+id/btnSelect"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="📁 Загрузить MP3"
-            android:textSize="14sp"
-            android:layout_marginEnd="10dp"/>
-
-        <Spinner
-            android:id="@+id/spinnerPause"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:minWidth="80dp"
-            android:entries="@array/pause_options"/>
-    </LinearLayout>
+    android:padding="16dp">
 
     <Button
-        android:id="@+id/btnPlayStop"
+        android:id="@+id/btnLoad"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="▶ Воспроизвести"
-        android:textSize="16sp"
-        android:layout_marginBottom="10dp"/>
+        android:text="Загрузить файл" />
 
-    <TextView
+    <ScrollView
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="📋 История"
-        android:textSize="13sp"
-        android:textStyle="bold"
-        android:layout_marginBottom="6dp"/>
+        android:layout_height="match_parent"
+        android:layout_marginTop="16dp">
 
-    <ListView
-        android:id="@+id/lvHistory"
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1"
-        android:layout_marginBottom="8dp"
-        android:background="#f5f5f5"/>
+        <TableLayout
+            android:id="@+id/tableTags"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:stretchColumns="1" />
 
-    <TextView
-        android:id="@+id/tvStatus"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="Готов"
-        android:gravity="center"
-        android:padding="8dp"
-        android:textSize="13sp"
-        android:background="#f0f0f0"/>
+    </ScrollView>
+
 </LinearLayout>
