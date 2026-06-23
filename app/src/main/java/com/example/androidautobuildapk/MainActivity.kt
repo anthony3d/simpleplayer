@@ -1,6 +1,5 @@
 package com.example.simpleplayer
 
-
 import android.Manifest
 import android.content.Intent
 import android.content.SharedPreferences
@@ -12,10 +11,12 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.provider.OpenableColumns
+import android.view.View
+import android.widget.AdapterView
 import android.widget.ArrayAdapter
 import android.widget.Button
-import android.widget.EditText
 import android.widget.ListView
+import android.widget.Spinner
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
@@ -26,11 +27,9 @@ import org.json.JSONObject
 
 class MainActivity : AppCompatActivity() {
     
-    private lateinit var etFileName: EditText
-    private lateinit var etPause: EditText
-    private lateinit var btnPlay: Button
-    private lateinit var btnStop: Button
     private lateinit var btnSelect: Button
+    private lateinit var btnPlayStop: Button
+    private lateinit var spinnerPause: Spinner
     private lateinit var lvHistory: ListView
     private lateinit var tvStatus: TextView
     
@@ -38,17 +37,19 @@ class MainActivity : AppCompatActivity() {
     private val handler = Handler(Looper.getMainLooper())
     private var isPlaying = false
     private var currentUri: Uri? = null
-    private var currentPauseSeconds = 0L
+    private var currentPauseSeconds = 5L
     private var checkPositionRunnable: Runnable? = null
     private var currentFileName = ""
     private var currentUriString = ""
     
     private val PICK_AUDIO_FILE = 1000
     private val MAX_HISTORY = 10
+    private val PAUSE_VALUES = listOf(2L, 5L, 10L, 20L, 30L)
     
     private lateinit var sharedPrefs: SharedPreferences
     private var historyList = mutableListOf<HistoryItem>()
     private var historyAdapter: ArrayAdapter<String>? = null
+    private var currentPlayingPosition = -1
     
     data class HistoryItem(
         val fileName: String,
@@ -60,23 +61,31 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
         
-        etFileName = findViewById(R.id.etFileName)
-        etPause = findViewById(R.id.etPause)
-        btnPlay = findViewById(R.id.btnPlay)
-        btnStop = findViewById(R.id.btnStop)
         btnSelect = findViewById(R.id.btnSelect)
+        btnPlayStop = findViewById(R.id.btnPlayStop)
+        spinnerPause = findViewById(R.id.spinnerPause)
         lvHistory = findViewById(R.id.lvHistory)
         tvStatus = findViewById(R.id.tvStatus)
         
         sharedPrefs = getSharedPreferences("player_history", MODE_PRIVATE)
         
-        etPause.setText("2")
+        // Настройка спиннера
+        val pauseOptions = resources.getStringArray(R.array.pause_options)
+        val adapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, pauseOptions)
+        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+        spinnerPause.adapter = adapter
+        spinnerPause.setSelection(1) // 5 сек по умолчанию
+        
+        spinnerPause.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                currentPauseSeconds = PAUSE_VALUES[position]
+            }
+            override fun onNothingSelected(parent: AdapterView<*>?) {}
+        }
         
         btnSelect.setOnClickListener { selectAudioFile() }
-        btnPlay.setOnClickListener { startPlaying() }
-        btnStop.setOnClickListener { stopPlaying() }
+        btnPlayStop.setOnClickListener { togglePlayStop() }
         
-        // Обработка клика по элементу истории
         lvHistory.setOnItemClickListener { _, _, position, _ ->
             if (position < historyList.size) {
                 val item = historyList[position]
@@ -84,7 +93,6 @@ class MainActivity : AppCompatActivity() {
             }
         }
         
-        // Долгий клик для удаления из истории
         lvHistory.setOnItemLongClickListener { _, _, position, _ ->
             if (position < historyList.size) {
                 removeFromHistory(position)
@@ -96,6 +104,7 @@ class MainActivity : AppCompatActivity() {
         
         checkPermissions()
         loadHistory()
+        updatePlayStopButton()
     }
     
     private fun selectAudioFile() {
@@ -111,11 +120,9 @@ class MainActivity : AppCompatActivity() {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode == PICK_AUDIO_FILE && resultCode == RESULT_OK) {
             data?.data?.let { uri ->
-                // Сохраняем URI
                 currentUri = uri
                 currentUriString = uri.toString()
                 
-                // Получаем持久ный доступ к файлу
                 try {
                     contentResolver.takePersistableUriPermission(
                         uri, 
@@ -125,20 +132,15 @@ class MainActivity : AppCompatActivity() {
                     e.printStackTrace()
                 }
                 
-                // Получаем имя файла
                 currentFileName = getFileName(uri)
-                etFileName.setText(currentFileName)
                 tvStatus.text = "Выбран: $currentFileName"
-                Toast.makeText(this, "Файл выбран: $currentFileName", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "Загружено: $currentFileName", Toast.LENGTH_SHORT).show()
                 
-                // Получаем паузу
-                val pause = etPause.text.toString().toLongOrNull() ?: 2
-                
-                // Добавляем в историю
+                val pause = currentPauseSeconds
                 addToHistory(currentFileName, currentUriString, pause)
                 
-                // Останавливаем воспроизведение если что-то играло
                 stopPlaying()
+                updatePlayStopButton()
             }
         }
     }
@@ -172,16 +174,12 @@ class MainActivity : AppCompatActivity() {
         }
     }
     
-    // ============ РАБОТА С ИСТОРИЕЙ ============
+    // ============ ИСТОРИЯ ============
     
     private fun addToHistory(fileName: String, uriString: String, pauseSeconds: Long) {
-        // Удаляем дубликаты
         historyList.removeAll { it.uriString == uriString }
-        
-        // Добавляем в начало
         historyList.add(0, HistoryItem(fileName, uriString, pauseSeconds))
         
-        // Ограничиваем размер
         if (historyList.size > MAX_HISTORY) {
             historyList = historyList.take(MAX_HISTORY).toMutableList()
         }
@@ -192,6 +190,11 @@ class MainActivity : AppCompatActivity() {
     
     private fun removeFromHistory(position: Int) {
         historyList.removeAt(position)
+        if (currentPlayingPosition == position) {
+            currentPlayingPosition = -1
+        } else if (currentPlayingPosition > position) {
+            currentPlayingPosition--
+        }
         saveHistory()
         updateHistoryUI()
         Toast.makeText(this, "Удалено из истории", Toast.LENGTH_SHORT).show()
@@ -203,19 +206,22 @@ class MainActivity : AppCompatActivity() {
             currentUri = uri
             currentUriString = item.uriString
             currentFileName = item.fileName
-            etFileName.setText(item.fileName)
-            etPause.setText(item.pauseSeconds.toString())
+            
+            // Устанавливаем паузу из истории
+            val pauseIndex = PAUSE_VALUES.indexOf(item.pauseSeconds)
+            if (pauseIndex >= 0) {
+                spinnerPause.setSelection(pauseIndex)
+                currentPauseSeconds = item.pauseSeconds
+            }
             
             tvStatus.text = "Загружено: ${item.fileName}"
             Toast.makeText(this, "Загружено: ${item.fileName}", Toast.LENGTH_SHORT).show()
             
-            // Автоматически начинаем воспроизведение
             startPlaying()
             
         } catch (e: Exception) {
             e.printStackTrace()
             Toast.makeText(this, "Ошибка загрузки файла", Toast.LENGTH_SHORT).show()
-            // Удаляем из истории если файл недоступен
             removeFromHistory(historyList.indexOf(item))
         }
     }
@@ -255,48 +261,64 @@ class MainActivity : AppCompatActivity() {
     }
     
     private fun updateHistoryUI() {
+        val displayList = historyList.mapIndexed { index, item ->
+            val prefix = if (index == currentPlayingPosition) "▶ " else ""
+            "$prefix${item.fileName}"
+        }
+        
         if (historyAdapter == null) {
             historyAdapter = ArrayAdapter(
                 this,
                 android.R.layout.simple_list_item_1,
-                historyList.map { 
-                    val pause = if (it.pauseSeconds > 0) " (пауза ${it.pauseSeconds}с)" else ""
-                    "${historyList.indexOf(it) + 1}. ${it.fileName}$pause"
-                }
+                displayList
             )
             lvHistory.adapter = historyAdapter
         } else {
             historyAdapter?.clear()
-            historyAdapter?.addAll(
-                historyList.map { 
-                    val pause = if (it.pauseSeconds > 0) " (пауза ${it.pauseSeconds}с)" else ""
-                    "${historyList.indexOf(it) + 1}. ${it.fileName}$pause"
-                }
-            )
+            historyAdapter?.addAll(displayList)
             historyAdapter?.notifyDataSetChanged()
+        }
+        
+        // Подсвечиваем активный трек
+        if (currentPlayingPosition >= 0 && currentPlayingPosition < lvHistory.childCount) {
+            for (i in 0 until lvHistory.childCount) {
+                val child = lvHistory.getChildAt(i)
+                if (i == currentPlayingPosition) {
+                    child?.setBackgroundColor(0x33FFFFFF)
+                } else {
+                    child?.setBackgroundColor(0x00000000)
+                }
+            }
         }
     }
     
     // ============ ВОСПРОИЗВЕДЕНИЕ ============
     
+    private fun togglePlayStop() {
+        if (isPlaying) {
+            stopPlaying()
+        } else {
+            startPlaying()
+        }
+        updatePlayStopButton()
+    }
+    
     private fun startPlaying() {
-        val pauseText = etPause.text.toString()
-        
         if (currentUri == null) {
-            tvStatus.text = "Сначала выберите файл"
-            Toast.makeText(this, "Нажмите 'Выбрать файл'", Toast.LENGTH_SHORT).show()
+            tvStatus.text = "Сначала загрузите файл"
+            Toast.makeText(this, "Нажмите 'Загрузить MP3'", Toast.LENGTH_SHORT).show()
             return
         }
         
         stopPlaying()
-        
-        currentPauseSeconds = pauseText.toLongOrNull() ?: 0
         isPlaying = true
         
         startPlayback()
         
         tvStatus.text = "▶ $currentFileName"
         Toast.makeText(this, "Воспроизведение: $currentFileName", Toast.LENGTH_SHORT).show()
+        updatePlayStopButton()
+        updateHistoryUI()
     }
     
     private fun startPlayback() {
@@ -311,6 +333,10 @@ class MainActivity : AppCompatActivity() {
                 start()
             }
             
+            // Обновляем позицию активного трека
+            currentPlayingPosition = historyList.indexOfFirst { it.uriString == currentUriString }
+            updateHistoryUI()
+            
             startMonitoringPlayback()
             
         } catch (e: Exception) {
@@ -318,6 +344,7 @@ class MainActivity : AppCompatActivity() {
             tvStatus.text = "Ошибка: ${e.message}"
             Toast.makeText(this, "Ошибка: ${e.message}", Toast.LENGTH_LONG).show()
             isPlaying = false
+            updatePlayStopButton()
         }
     }
     
@@ -372,6 +399,16 @@ class MainActivity : AppCompatActivity() {
         
         runOnUiThread {
             tvStatus.text = "⏹ Остановлено"
+            updatePlayStopButton()
+            updateHistoryUI()
+        }
+    }
+    
+    private fun updatePlayStopButton() {
+        if (isPlaying) {
+            btnPlayStop.text = "⏹ Стоп"
+        } else {
+            btnPlayStop.text = "▶ Воспроизвести"
         }
     }
     
