@@ -11,29 +11,27 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.provider.OpenableColumns
+import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.EditText
-import android.widget.LinearLayout
+import android.widget.ListView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
-import org.jaudiotagger.audio.AudioFileIO
-import org.jaudiotagger.tag.FieldKey
-import java.io.File
+import org.json.JSONArray
+import org.json.JSONObject
 
 class MainActivity : AppCompatActivity() {
     
+    private lateinit var etFileName: EditText
     private lateinit var etPause: EditText
     private lateinit var btnPlay: Button
     private lateinit var btnStop: Button
     private lateinit var btnSelect: Button
+    private lateinit var lvHistory: ListView
     private lateinit var tvStatus: TextView
-    private lateinit var tvFileName: TextView
-    private lateinit var tagsContainer: LinearLayout
-    private lateinit var tvNoTags: TextView
-    private lateinit var historyContainer: LinearLayout
     
     private var mediaPlayer: MediaPlayer? = null
     private val handler = Handler(Looper.getMainLooper())
@@ -42,35 +40,34 @@ class MainActivity : AppCompatActivity() {
     private var currentPauseSeconds = 0L
     private var checkPositionRunnable: Runnable? = null
     private var currentFileName = ""
-    private var currentFilePath: String? = null
+    private var currentUriString = ""
     
     private val PICK_AUDIO_FILE = 1000
-    private val MAX_HISTORY = 5
+    private val MAX_HISTORY = 10
     
-    private lateinit var prefs: SharedPreferences
-    private val historyList = mutableListOf<TrackInfo>()
+    private lateinit var sharedPrefs: SharedPreferences
+    private var historyList = mutableListOf<HistoryItem>()
+    private var historyAdapter: ArrayAdapter<String>? = null
     
-    data class TrackInfo(
-        val uri: String,
+    data class HistoryItem(
         val fileName: String,
-        val tags: Map<String, String>
+        val uriString: String,
+        val pauseSeconds: Long
     )
     
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
         
+        etFileName = findViewById(R.id.etFileName)
         etPause = findViewById(R.id.etPause)
         btnPlay = findViewById(R.id.btnPlay)
         btnStop = findViewById(R.id.btnStop)
         btnSelect = findViewById(R.id.btnSelect)
+        lvHistory = findViewById(R.id.lvHistory)
         tvStatus = findViewById(R.id.tvStatus)
-        tvFileName = findViewById(R.id.tvFileName)
-        tagsContainer = findViewById(R.id.tagsContainer)
-        tvNoTags = findViewById(R.id.tvNoTags)
-        historyContainer = findViewById(R.id.historyContainer)
         
-        prefs = getSharedPreferences("player_prefs", MODE_PRIVATE)
+        sharedPrefs = getSharedPreferences("player_history", MODE_PRIVATE)
         
         etPause.setText("2")
         
@@ -78,10 +75,26 @@ class MainActivity : AppCompatActivity() {
         btnPlay.setOnClickListener { startPlaying() }
         btnStop.setOnClickListener { stopPlaying() }
         
-        checkPermissions()
+        // Обработка клика по элементу истории
+        lvHistory.setOnItemClickListener { _, _, position, _ ->
+            if (position < historyList.size) {
+                val item = historyList[position]
+                loadHistoryItem(item)
+            }
+        }
         
+        // Долгий клик для удаления из истории
+        lvHistory.setOnItemLongClickListener { _, _, position, _ ->
+            if (position < historyList.size) {
+                removeFromHistory(position)
+                true
+            } else {
+                false
+            }
+        }
+        
+        checkPermissions()
         loadHistory()
-        updateHistoryUI()
     }
     
     private fun selectAudioFile() {
@@ -97,44 +110,36 @@ class MainActivity : AppCompatActivity() {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode == PICK_AUDIO_FILE && resultCode == RESULT_OK) {
             data?.data?.let { uri ->
+                // Сохраняем URI
                 currentUri = uri
+                currentUriString = uri.toString()
                 
+                // Получаем持久ный доступ к файлу
                 try {
                     contentResolver.takePersistableUriPermission(
-                        uri,
+                        uri, 
                         Intent.FLAG_GRANT_READ_URI_PERMISSION
                     )
                 } catch (e: Exception) {
                     e.printStackTrace()
                 }
                 
+                // Получаем имя файла
                 currentFileName = getFileName(uri)
-                currentFilePath = getFilePathFromUri(uri)
-                
-                tvFileName.text = currentFileName
-                
-                val tags = readAllTags()
-                displayTags(tags)
-                
-                addToHistory(TrackInfo(
-                    uri = uri.toString(),
-                    fileName = currentFileName,
-                    tags = tags
-                ))
-                
+                etFileName.setText(currentFileName)
                 tvStatus.text = "Выбран: $currentFileName"
                 Toast.makeText(this, "Файл выбран: $currentFileName", Toast.LENGTH_SHORT).show()
                 
+                // Получаем паузу
+                val pause = etPause.text.toString().toLongOrNull() ?: 2
+                
+                // Добавляем в историю
+                addToHistory(currentFileName, currentUriString, pause)
+                
+                // Останавливаем воспроизведение если что-то играло
                 stopPlaying()
             }
         }
-    }
-    
-    private fun getFilePathFromUri(uri: Uri): String? {
-        if (uri.scheme == "file") {
-            return uri.path
-        }
-        return null
     }
     
     private fun getFileName(uri: Uri): String {
@@ -148,64 +153,6 @@ class MainActivity : AppCompatActivity() {
             }
         }
         return fileName
-    }
-    
-    private fun readAllTags(): Map<String, String> {
-        val tags = mutableMapOf<String, String>()
-        
-        try {
-            if (currentFilePath != null && File(currentFilePath).exists()) {
-                val audioFile = AudioFileIO.read(File(currentFilePath))
-                val tag = audioFile.tag
-                
-                if (tag != null) {
-                    tag.getFirst(FieldKey.TITLE)?.let { if (it.isNotEmpty()) tags["Название"] = it }
-                    tag.getFirst(FieldKey.ARTIST)?.let { if (it.isNotEmpty()) tags["Исполнитель"] = it }
-                    tag.getFirst(FieldKey.ALBUM)?.let { if (it.isNotEmpty()) tags["Альбом"] = it }
-                    tag.getFirst(FieldKey.YEAR)?.let { if (it.isNotEmpty()) tags["Год"] = it }
-                    tag.getFirst(FieldKey.GENRE)?.let { if (it.isNotEmpty()) tags["Жанр"] = it }
-                    tag.getFirst(FieldKey.COMMENT)?.let { if (it.isNotEmpty()) tags["Комментарий"] = it }
-                    tag.getFirst(FieldKey.TRACK)?.let { if (it.isNotEmpty()) tags["Трек"] = it }
-                    tag.getFirst(FieldKey.COMPOSER)?.let { if (it.isNotEmpty()) tags["Композитор"] = it }
-                    tag.getFirst(FieldKey.ALBUM_ARTIST)?.let { if (it.isNotEmpty()) tags["Исполнитель альбома"] = it }
-                    tag.getFirst(FieldKey.DISC_NO)?.let { if (it.isNotEmpty()) tags["Номер диска"] = it }
-                    tag.getFirst(FieldKey.LYRICS)?.let { if (it.isNotEmpty()) tags["Текст"] = it }
-                    tag.getFirst(FieldKey.COPYRIGHT)?.let { if (it.isNotEmpty()) tags["Авторские права"] = it }
-                    tag.getFirst(FieldKey.ENCODER)?.let { if (it.isNotEmpty()) tags["Кодировщик"] = it }
-                    tag.getFirst(FieldKey.BPM)?.let { if (it.isNotEmpty()) tags["BPM"] = it }
-                    tag.getFirst(FieldKey.GROUPING)?.let { if (it.isNotEmpty()) tags["Группировка"] = it }
-                }
-            }
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
-        
-        return tags
-    }
-    
-    private fun displayTags(tags: Map<String, String>) {
-        tagsContainer.removeAllViews()
-        
-        if (tags.isEmpty()) {
-            tvNoTags.visibility = TextView.VISIBLE
-            return
-        }
-        
-        tvNoTags.visibility = TextView.GONE
-        
-        val priorityKeys = listOf("Название", "Исполнитель", "Альбом")
-        val sortedKeys = priorityKeys.filter { it in tags.keys } + 
-                         tags.keys.filter { it !in priorityKeys }.sorted()
-        
-        for (key in sortedKeys) {
-            val value = tags[key] ?: continue
-            val tv = TextView(this).apply {
-                text = "$key: $value"
-                textSize = 14f
-                setPadding(5, 3, 5, 3)
-            }
-            tagsContainer.addView(tv)
-        }
     }
     
     private fun checkPermissions() {
@@ -223,6 +170,113 @@ class MainActivity : AppCompatActivity() {
             ActivityCompat.requestPermissions(this, missingPermissions, 1)
         }
     }
+    
+    // ============ РАБОТА С ИСТОРИЕЙ ============
+    
+    private fun addToHistory(fileName: String, uriString: String, pauseSeconds: Long) {
+        // Удаляем дубликаты
+        historyList.removeAll { it.uriString == uriString }
+        
+        // Добавляем в начало
+        historyList.add(0, HistoryItem(fileName, uriString, pauseSeconds))
+        
+        // Ограничиваем размер
+        if (historyList.size > MAX_HISTORY) {
+            historyList = historyList.take(MAX_HISTORY).toMutableList()
+        }
+        
+        saveHistory()
+        updateHistoryUI()
+    }
+    
+    private fun removeFromHistory(position: Int) {
+        historyList.removeAt(position)
+        saveHistory()
+        updateHistoryUI()
+        Toast.makeText(this, "Удалено из истории", Toast.LENGTH_SHORT).show()
+    }
+    
+    private fun loadHistoryItem(item: HistoryItem) {
+        try {
+            val uri = Uri.parse(item.uriString)
+            currentUri = uri
+            currentUriString = item.uriString
+            currentFileName = item.fileName
+            etFileName.setText(item.fileName)
+            etPause.setText(item.pauseSeconds.toString())
+            
+            tvStatus.text = "Загружено: ${item.fileName}"
+            Toast.makeText(this, "Загружено: ${item.fileName}", Toast.LENGTH_SHORT).show()
+            
+            // Автоматически начинаем воспроизведение
+            startPlaying()
+            
+        } catch (e: Exception) {
+            e.printStackTrace()
+            Toast.makeText(this, "Ошибка загрузки файла", Toast.LENGTH_SHORT).show()
+            // Удаляем из истории если файл недоступен
+            removeFromHistory(historyList.indexOf(item))
+        }
+    }
+    
+    private fun saveHistory() {
+        val jsonArray = JSONArray()
+        historyList.forEach { item ->
+            val jsonObject = JSONObject().apply {
+                put("fileName", item.fileName)
+                put("uriString", item.uriString)
+                put("pauseSeconds", item.pauseSeconds)
+            }
+            jsonArray.put(jsonObject)
+        }
+        sharedPrefs.edit().putString("history", jsonArray.toString()).apply()
+    }
+    
+    private fun loadHistory() {
+        val jsonString = sharedPrefs.getString("history", "[]") ?: "[]"
+        try {
+            val jsonArray = JSONArray(jsonString)
+            historyList.clear()
+            for (i in 0 until jsonArray.length()) {
+                val jsonObject = jsonArray.getJSONObject(i)
+                historyList.add(
+                    HistoryItem(
+                        jsonObject.getString("fileName"),
+                        jsonObject.getString("uriString"),
+                        jsonObject.getLong("pauseSeconds")
+                    )
+                )
+            }
+            updateHistoryUI()
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+    
+    private fun updateHistoryUI() {
+        if (historyAdapter == null) {
+            historyAdapter = ArrayAdapter(
+                this,
+                android.R.layout.simple_list_item_1,
+                historyList.map { 
+                    val pause = if (it.pauseSeconds > 0) " (пауза ${it.pauseSeconds}с)" else ""
+                    "${historyList.indexOf(it) + 1}. ${it.fileName}$pause"
+                }
+            )
+            lvHistory.adapter = historyAdapter
+        } else {
+            historyAdapter?.clear()
+            historyAdapter?.addAll(
+                historyList.map { 
+                    val pause = if (it.pauseSeconds > 0) " (пауза ${it.pauseSeconds}с)" else ""
+                    "${historyList.indexOf(it) + 1}. ${it.fileName}$pause"
+                }
+            )
+            historyAdapter?.notifyDataSetChanged()
+        }
+    }
+    
+    // ============ ВОСПРОИЗВЕДЕНИЕ ============
     
     private fun startPlaying() {
         val pauseText = etPause.text.toString()
@@ -318,122 +372,6 @@ class MainActivity : AppCompatActivity() {
         runOnUiThread {
             tvStatus.text = "⏹ Остановлено"
         }
-    }
-    
-    // ==================== ИСТОРИЯ ====================
-    
-    private fun addToHistory(track: TrackInfo) {
-        historyList.removeAll { it.uri == track.uri }
-        historyList.add(0, track)
-        while (historyList.size > MAX_HISTORY) {
-            historyList.removeAt(historyList.lastIndex)
-        }
-        saveHistory()
-        updateHistoryUI()
-    }
-    
-    private fun loadHistory() {
-        historyList.clear()
-        val count = prefs.getInt("history_count", 0)
-        for (i in 0 until count) {
-            val uri = prefs.getString("history_${i}_uri", "") ?: ""
-            val fileName = prefs.getString("history_${i}_name", "") ?: ""
-            if (uri.isNotEmpty()) {
-                val tags = mutableMapOf<String, String>()
-                val tagsCount = prefs.getInt("history_${i}_tags_count", 0)
-                for (j in 0 until tagsCount) {
-                    val key = prefs.getString("history_${i}_tag_${j}_key", "") ?: ""
-                    val value = prefs.getString("history_${i}_tag_${j}_value", "") ?: ""
-                    if (key.isNotEmpty() && value.isNotEmpty()) {
-                        tags[key] = value
-                    }
-                }
-                historyList.add(TrackInfo(uri, fileName, tags))
-            }
-        }
-    }
-    
-    private fun saveHistory() {
-        val editor = prefs.edit()
-        editor.putInt("history_count", historyList.size)
-        historyList.forEachIndexed { index, track ->
-            editor.putString("history_${index}_uri", track.uri)
-            editor.putString("history_${index}_name", track.fileName)
-            
-            editor.putInt("history_${index}_tags_count", track.tags.size)
-            var tagIndex = 0
-            for ((key, value) in track.tags) {
-                editor.putString("history_${index}_tag_${tagIndex}_key", key)
-                editor.putString("history_${index}_tag_${tagIndex}_value", value)
-                tagIndex++
-            }
-        }
-        editor.apply()
-    }
-    
-    private fun updateHistoryUI() {
-        historyContainer.removeAllViews()
-        
-        if (historyList.isEmpty()) {
-            val tv = TextView(this).apply {
-                text = "Нет истории"
-                textSize = 14f
-                setPadding(10, 10, 10, 10)
-            }
-            historyContainer.addView(tv)
-            return
-        }
-        
-        historyList.forEachIndexed { index, track ->
-            val itemView = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                setPadding(10, 10, 10, 10)
-                background = ContextCompat.getDrawable(this@MainActivity, android.R.drawable.btn_default)
-                layoutParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT
-                )
-            }
-            
-            val infoText = TextView(this).apply {
-                text = "${index + 1}. ${track.fileName}"
-                textSize = 14f
-                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-                setPadding(10, 5, 10, 5)
-            }
-            
-            val playBtn = Button(this).apply {
-                text = "▶"
-                setOnClickListener {
-                    loadTrackFromHistory(index)
-                }
-                layoutParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT
-                )
-            }
-            
-            itemView.addView(infoText)
-            itemView.addView(playBtn)
-            historyContainer.addView(itemView)
-        }
-    }
-    
-    private fun loadTrackFromHistory(index: Int) {
-        if (index < 0 || index >= historyList.size) return
-        
-        val track = historyList[index]
-        currentUri = Uri.parse(track.uri)
-        currentFileName = track.fileName
-        
-        tvFileName.text = currentFileName
-        displayTags(track.tags)
-        
-        tvStatus.text = "Загружен: $currentFileName"
-        Toast.makeText(this, "Загружен: $currentFileName", Toast.LENGTH_SHORT).show()
-        
-        stopPlaying()
-        startPlaying()
     }
     
     override fun onDestroy() {
