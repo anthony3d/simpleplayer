@@ -1,4 +1,4 @@
-package com.example.androidautobuildapk  // ← ИСПРАВЛЕНО! Теперь соответствует вашему проекту
+package com.example.androidautobuildapk
 
 import android.media.MediaMetadataRetriever
 import android.os.Bundle
