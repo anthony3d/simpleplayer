@@ -1,4 +1,4 @@
-package com.example.mp3tagviewer
+package com.example.androidautobuildapk  // ← ИСПРАВЛЕНО! Теперь соответствует вашему проекту
 
 import android.media.MediaMetadataRetriever
 import android.os.Bundle
@@ -21,10 +21,10 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_main)
+        setContentView(R.layout.activity_main)  // ← Здесь R теперь будет найден
 
-        tableTags = findViewById(R.id.tableTags)
-        val btnLoad = findViewById<Button>(R.id.btnLoad)
+        tableTags = findViewById(R.id.tableTags)  // ← И здесь
+        val btnLoad = findViewById<Button>(R.id.btnLoad)  // ← И здесь
 
         btnLoad.setOnClickListener {
             pickFile.launch("audio/*")
