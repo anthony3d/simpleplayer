@@ -1,5 +1,6 @@
 package com.example.androidautobuildapk
 
+import com.example.androidautobuildapk.R  // ← ДОБАВЬТЕ ЭТУ СТРОКУ!
 import android.media.MediaMetadataRetriever
 import android.os.Bundle
 import android.widget.Button
