@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string-array name="pause_options">
+        <item>2 сек</item>
+        <item>5 сек</item>
+        <item>10 сек</item>
+        <item>20 сек</item>
+        <item>30 сек</item>
+    </string-array>
+</resources>
