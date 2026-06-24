@@ -4,7 +4,6 @@ import android.Manifest
 import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
-import android.graphics.Color
 import android.media.MediaMetadataRetriever
 import android.media.MediaPlayer
 import android.net.Uri
@@ -29,8 +28,6 @@ import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import org.json.JSONArray
 import org.json.JSONObject
-import java.io.File
-import java.io.FileOutputStream
 
 class MainActivity : AppCompatActivity() {
     
@@ -59,7 +56,7 @@ class MainActivity : AppCompatActivity() {
     private val PICK_AUDIO_FILE = 1000
     private val MAX_HISTORY = 10
     private val PAUSE_VALUES = listOf(2L, 5L, 10L, 20L, 30L)
-    private val WAVEFORM_COLUMNS = 40
+    private val WAVEFORM_COLUMNS = 200 // Увеличено до 200 столбцов
     
     private lateinit var sharedPrefs: SharedPreferences
     private var historyList = mutableListOf<HistoryItem>()
@@ -78,146 +75,140 @@ class MainActivity : AppCompatActivity() {
         val album: String
     )
     
-// ============ КАСТОМНЫЙ АДАПТЕР ДЛЯ ИСТОРИИ ============
+    // ============ КАСТОМНЫЙ АДАПТЕР ДЛЯ ИСТОРИИ ============
     
-inner class HistoryAdapter(context: MainActivity, private val items: MutableList<HistoryItem>) :
-    ArrayAdapter<HistoryItem>(context, 0, items) {
-    
-    private var playingPosition = -1
-    private var progress = 0f
-    
-    fun setPlayingPosition(position: Int) {
-        playingPosition = position
-        notifyDataSetChanged()
-    }
-    
-    fun updateProgress(progressValue: Float) {
-        progress = progressValue
-        if (playingPosition >= 0) {
-            val view = lvHistory.getChildAt(playingPosition - lvHistory.firstVisiblePosition)
-            if (view != null) {
-                updateProgressForView(view, progressValue)
+    inner class HistoryAdapter(context: MainActivity, private val items: MutableList<HistoryItem>) :
+        ArrayAdapter<HistoryItem>(context, 0, items) {
+        
+        private var playingPosition = -1
+        private var progress = 0f
+        
+        fun setPlayingPosition(position: Int) {
+            playingPosition = position
+            notifyDataSetChanged()
+        }
+        
+        fun updateProgress(progressValue: Float) {
+            progress = progressValue
+            if (playingPosition >= 0) {
+                val view = lvHistory.getChildAt(playingPosition - lvHistory.firstVisiblePosition)
+                if (view != null) {
+                    updateProgressForView(view, progressValue)
+                }
             }
         }
-    }
-    
-    private fun updateProgressForView(view: View, progressValue: Float) {
-        val progressFill = view.findViewById<View>(R.id.progressFill)
-        if (progressFill != null) {
-            val width = (view.width * progressValue).toInt()
+        
+        private fun updateProgressForView(view: View, progressValue: Float) {
+            val progressFill = view.findViewById<View>(R.id.progressFill)
+            if (progressFill != null) {
+                val width = (view.width * progressValue).toInt()
+                progressFill.layoutParams.width = width
+                progressFill.requestLayout()
+            }
+        }
+        
+        override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
+            val view = convertView ?: LayoutInflater.from(context).inflate(
+                R.layout.history_item, parent, false
+            )
+            
+            val textView = view.findViewById<TextView>(R.id.tvHistoryItem)
+            val progressFill = view.findViewById<View>(R.id.progressFill)
+            val waveformContainer = view.findViewById<LinearLayout>(R.id.waveformContainer)
+            
+            val item = items[position]
+            
+            // Формируем текст
+            val prefix = if (position == playingPosition) "▶ " else ""
+            textView.text = "$prefix${item.fileName}"
+            
+            // Настройка цвета
+            if (position == playingPosition) {
+                progressFill.setBackgroundColor(0xFF4CAF50.toInt())
+                textView.setTextColor(0xFFFFFFFF.toInt())
+                textView.setShadowLayer(2f, 1f, 1f, 0xCC000000.toInt())
+            } else {
+                progressFill.setBackgroundColor(0x334CAF50.toInt())
+                textView.setTextColor(0xFF333333.toInt())
+                textView.setShadowLayer(0f, 0f, 0f, 0)
+            }
+            
+            // Рисуем волновую форму
+            drawWaveform(waveformContainer, position)
+            
+            // Обновляем прогресс
+            val currentProgress = if (position == playingPosition) progress else 0f
+            val width = (view.width * currentProgress).toInt()
             progressFill.layoutParams.width = width
             progressFill.requestLayout()
-        }
-    }
-    
-    override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
-        val view = convertView ?: LayoutInflater.from(context).inflate(
-            R.layout.history_item, parent, false
-        )
-        
-        val textView = view.findViewById<TextView>(R.id.tvHistoryItem)
-        val progressFill = view.findViewById<View>(R.id.progressFill)
-        val waveformContainer = view.findViewById<LinearLayout>(R.id.waveformContainer)
-        
-        val item = items[position]
-        
-        // Формируем текст
-        val prefix = if (position == playingPosition) "▶ " else ""
-        textView.text = "$prefix${item.fileName}"
-        
-        // Настройка цвета - ИСПРАВЛЕНО
-        if (position == playingPosition) {
-            progressFill.setBackgroundColor(0xFF4CAF50.toInt()) // Зеленый с полной непрозрачностью
-            textView.setTextColor(0xFFFFFFFF.toInt()) // Белый
-            textView.setShadowLayer(2f, 1f, 1f, 0xCC000000.toInt())
-        } else {
-            progressFill.setBackgroundColor(0x334CAF50.toInt()) // Полупрозрачный зеленый
-            textView.setTextColor(0xFF333333.toInt()) // Темно-серый
-            textView.setShadowLayer(0f, 0f, 0f, 0)
-        }
-        
-        // Рисуем волновую форму
-        drawWaveform(waveformContainer, position)
-        
-        // Обновляем прогресс
-        val currentProgress = if (position == playingPosition) progress else 0f
-        val width = (view.width * currentProgress).toInt()
-        progressFill.layoutParams.width = width
-        progressFill.requestLayout()
-        
-        return view
-    }
-    
-    private fun drawWaveform(container: LinearLayout, position: Int) {
-        container.removeAllViews()
-        
-        // Получаем данные волны для этого трека
-        val waveData = getWaveformForItem(items[position])
-        
-        if (waveData == null || waveData.isEmpty()) {
-            // Если данных нет, показываем простой фон
-            val dummyView = View(context).apply {
-                layoutParams = LinearLayout.LayoutParams(
-                    0,
-                    LinearLayout.LayoutParams.MATCH_PARENT,
-                    1f
-                )
-            }
-            container.addView(dummyView)
-            return
-        }
-        
-        // Создаем столбцы
-        val maxHeight = 60 // Максимальная высота столбца в dp
-        
-        // Преобразуем dp в пиксели
-        val density = context.resources.displayMetrics.density
-        val maxHeightPx = (maxHeight * density).toInt()
-        
-        for (i in waveData.indices) {
-            val value = waveData[i]
-            val height = (value * maxHeightPx).toInt()
             
-            val bar = View(context).apply {
-                layoutParams = LinearLayout.LayoutParams(
-                    0,
-                    height.coerceAtLeast(2), // Минимальная высота 2px чтобы столбцы были видны
-                    1f
-                )
-                
-                // Цвет зависит от позиции (активный/неактивный) - ИСПРАВЛЕНО
-                if (position == playingPosition) {
-                    setBackgroundColor(0xFF4CAF50.toInt()) // Зеленый
-                } else {
-                    setBackgroundColor(0x666666.toInt()) // Серый
+            return view
+        }
+        
+        private fun drawWaveform(container: LinearLayout, position: Int) {
+            container.removeAllViews()
+            
+            // Получаем данные волны для этого трека
+            val waveData = getWaveformForItem(items[position])
+            
+            if (waveData == null || waveData.isEmpty()) {
+                val dummyView = View(context).apply {
+                    layoutParams = LinearLayout.LayoutParams(
+                        0,
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        1f
+                    )
                 }
-                
-                // Немного закругляем углы
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                    outlineProvider = null
-                }
+                container.addView(dummyView)
+                return
             }
             
-            container.addView(bar)
+            // Создаем столбцы
+            val maxHeight = 60 // Максимальная высота столбца в dp
+            
+            // Преобразуем dp в пиксели
+            val density = context.resources.displayMetrics.density
+            val maxHeightPx = (maxHeight * density).toInt()
+            
+            // Для 200 столбцов делаем их тоньше
+            val barWidth = 1f / waveData.size
+            
+            for (i in waveData.indices) {
+                val value = waveData[i]
+                val height = (value * maxHeightPx).toInt()
+                
+                val bar = View(context).apply {
+                    layoutParams = LinearLayout.LayoutParams(
+                        0,
+                        height.coerceAtLeast(2),
+                        barWidth
+                    )
+                    
+                    // Цвет зависит от позиции (активный/неактивный)
+                    if (position == playingPosition) {
+                        setBackgroundColor(0xFF4CAF50.toInt())
+                    } else {
+                        setBackgroundColor(0x666666.toInt())
+                    }
+                }
+                
+                container.addView(bar)
+            }
+        }
+        
+        override fun getItem(position: Int): HistoryItem {
+            return items[position]
+        }
+        
+        override fun getCount(): Int {
+            return items.size
         }
     }
-    
-    override fun getItem(position: Int): HistoryItem {
-        return items[position]
-    }
-    
-    override fun getCount(): Int {
-        return items.size
-    }
-} 
     
     // ============ ИЗВЛЕЧЕНИЕ ВОЛНОВОЙ ФОРМЫ ============
     
     private fun getWaveformForItem(item: HistoryItem): FloatArray? {
         // Кешируем волновую форму для URI
-        val cacheKey = item.uriString.hashCode()
-        
-        // Проверяем кеш в памяти
         if (item.uriString == currentUriString && waveformData != null) {
             return waveformData
         }
@@ -228,22 +219,16 @@ inner class HistoryAdapter(context: MainActivity, private val items: MutableList
             val retriever = MediaMetadataRetriever()
             retriever.setDataSource(this, uri)
             
-            // Извлекаем аудио в байтовый массив (только для демонстрации)
-            // В реальности MediaMetadataRetriever не дает прямого доступа к PCM
-            // Поэтому используем альтернативный метод - симуляция волны на основе длительности
-            
             val duration = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
                 ?.toLongOrNull() ?: 30000
             
             retriever.release()
             
             // Генерируем реалистичную волновую форму на основе длительности
-            // Это симуляция, так как MediaMetadataRetriever не дает доступа к PCM данным
             return generateWaveform(duration)
             
         } catch (e: Exception) {
             e.printStackTrace()
-            // Возвращаем случайную волну
             return generateRandomWaveform()
         }
     }
@@ -262,9 +247,17 @@ inner class HistoryAdapter(context: MainActivity, private val items: MutableList
             // Синусоидальная огибающая
             val envelope = Math.sin(i.toDouble() / columns * Math.PI).toFloat()
             // Случайный шум с разной амплитудой
-            val noise = (0.5f + random.nextFloat() * 0.5f)
+            val noise = (0.3f + random.nextFloat() * 0.7f)
+            // Добавляем больше вариаций для детализации
+            val variation = Math.sin(i.toDouble() * 0.3).toFloat() * 0.3f + 0.7f
             // Комбинируем
-            pattern[i] = envelope * noise
+            pattern[i] = envelope * noise * variation
+        }
+        
+        // Добавляем небольшие пики для реалистичности
+        for (i in 10 until columns - 10 step 3) {
+            val peak = random.nextFloat() * 0.3f
+            pattern[i] = (pattern[i] + peak).coerceAtMost(1f)
         }
         
         // Нормализуем
@@ -282,10 +275,30 @@ inner class HistoryAdapter(context: MainActivity, private val items: MutableList
         val random = java.util.Random()
         
         for (i in 0 until columns) {
-            result[i] = 0.2f + random.nextFloat() * 0.8f
+            val base = 0.2f + random.nextFloat() * 0.8f
+            val smooth = Math.sin(i.toDouble() * 0.05).toFloat() * 0.2f + 0.8f
+            result[i] = base * smooth
         }
         
         return result
+    }
+    
+    private fun extractWaveform(uri: Uri) {
+        try {
+            val retriever = MediaMetadataRetriever()
+            retriever.setDataSource(this, uri)
+            
+            val duration = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
+                ?.toLongOrNull() ?: 30000
+            
+            retriever.release()
+            
+            waveformData = generateWaveform(duration)
+            
+        } catch (e: Exception) {
+            e.printStackTrace()
+            waveformData = generateRandomWaveform()
+        }
     }
     
     // ============ ОСНОВНЫЕ МЕТОДЫ ============
@@ -388,24 +401,6 @@ inner class HistoryAdapter(context: MainActivity, private val items: MutableList
                 stopPlaying()
                 updatePlayStopButton()
             }
-        }
-    }
-    
-    private fun extractWaveform(uri: Uri) {
-        try {
-            val retriever = MediaMetadataRetriever()
-            retriever.setDataSource(this, uri)
-            
-            val duration = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
-                ?.toLongOrNull() ?: 30000
-            
-            retriever.release()
-            
-            waveformData = generateWaveform(duration)
-            
-        } catch (e: Exception) {
-            e.printStackTrace()
-            waveformData = generateRandomWaveform()
         }
     }
     
