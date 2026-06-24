@@ -78,134 +78,138 @@ class MainActivity : AppCompatActivity() {
         val album: String
     )
     
-    // ============ КАСТОМНЫЙ АДАПТЕР ДЛЯ ИСТОРИИ ============
+// ============ КАСТОМНЫЙ АДАПТЕР ДЛЯ ИСТОРИИ ============
     
-    inner class HistoryAdapter(context: MainActivity, private val items: MutableList<HistoryItem>) :
-        ArrayAdapter<HistoryItem>(context, 0, items) {
-        
-        private var playingPosition = -1
-        private var progress = 0f
-        
-        fun setPlayingPosition(position: Int) {
-            playingPosition = position
-            notifyDataSetChanged()
-        }
-        
-        fun updateProgress(progressValue: Float) {
-            progress = progressValue
-            if (playingPosition >= 0) {
-                val view = lvHistory.getChildAt(playingPosition - lvHistory.firstVisiblePosition)
-                if (view != null) {
-                    updateProgressForView(view, progressValue)
-                }
+inner class HistoryAdapter(context: MainActivity, private val items: MutableList<HistoryItem>) :
+    ArrayAdapter<HistoryItem>(context, 0, items) {
+    
+    private var playingPosition = -1
+    private var progress = 0f
+    
+    fun setPlayingPosition(position: Int) {
+        playingPosition = position
+        notifyDataSetChanged()
+    }
+    
+    fun updateProgress(progressValue: Float) {
+        progress = progressValue
+        if (playingPosition >= 0) {
+            val view = lvHistory.getChildAt(playingPosition - lvHistory.firstVisiblePosition)
+            if (view != null) {
+                updateProgressForView(view, progressValue)
             }
-        }
-        
-        private fun updateProgressForView(view: View, progressValue: Float) {
-            val progressFill = view.findViewById<View>(R.id.progressFill)
-            if (progressFill != null) {
-                val width = (view.width * progressValue).toInt()
-                progressFill.layoutParams.width = width
-                progressFill.requestLayout()
-            }
-        }
-        
-        override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
-            val view = convertView ?: LayoutInflater.from(context).inflate(
-                R.layout.history_item, parent, false
-            )
-            
-            val textView = view.findViewById<TextView>(R.id.tvHistoryItem)
-            val progressFill = view.findViewById<View>(R.id.progressFill)
-            val waveformContainer = view.findViewById<LinearLayout>(R.id.waveformContainer)
-            
-            val item = items[position]
-            
-            // Формируем текст
-            val prefix = if (position == playingPosition) "▶ " else ""
-            textView.text = "$prefix${item.fileName}"
-            
-            // Настройка цвета
-            if (position == playingPosition) {
-                progressFill.setBackgroundColor(0xCC4CAF50)
-                textView.setTextColor(0xFFFFFFFF.toInt())
-                textView.setShadowLayer(2f, 1f, 1f, 0xCC000000.toInt())
-            } else {
-                progressFill.setBackgroundColor(0x334CAF50)
-                textView.setTextColor(0xFF333333.toInt())
-                textView.setShadowLayer(0f, 0f, 0f, 0)
-            }
-            
-            // Рисуем волновую форму
-            drawWaveform(waveformContainer, position)
-            
-            // Обновляем прогресс
-            val currentProgress = if (position == playingPosition) progress else 0f
-            val width = (view.width * currentProgress).toInt()
-            progressFill.layoutParams.width = width
-            progressFill.requestLayout()
-            
-            return view
-        }
-        
-        private fun drawWaveform(container: LinearLayout, position: Int) {
-            container.removeAllViews()
-            
-            // Получаем данные волны для этого трека
-            val waveData = getWaveformForItem(items[position])
-            
-            if (waveData == null || waveData.isEmpty()) {
-                // Если данных нет, показываем простой фон
-                val dummyView = View(context).apply {
-                    layoutParams = LinearLayout.LayoutParams(
-                        0,
-                        LinearLayout.LayoutParams.MATCH_PARENT,
-                        1f
-                    )
-                }
-                container.addView(dummyView)
-                return
-            }
-            
-            // Создаем столбцы
-            val maxHeight = 60 // Максимальная высота столбца в dp
-            
-            for (i in waveData.indices) {
-                val value = waveData[i]
-                val height = (value * maxHeight).toInt()
-                
-                val bar = View(context).apply {
-                    layoutParams = LinearLayout.LayoutParams(
-                        0,
-                        height,
-                        1f
-                    )
-                    
-                    // Цвет зависит от позиции (активный/неактивный)
-                    if (position == playingPosition) {
-                        setBackgroundColor(0xCC4CAF50)
-                    } else {
-                        setBackgroundColor(0x666666)
-                    }
-                    
-                    // Немного закругляем углы
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                        outlineProvider = null
-                    }
-                }
-                
-                container.addView(bar)
-            }
-        }
-        
-        override fun getItem(position: Int): HistoryItem {
-            return items[position]
-        }
-        
-        override fun getCount(): Int {
-            return items.size
         }
     }
+    
+    private fun updateProgressForView(view: View, progressValue: Float) {
+        val progressFill = view.findViewById<View>(R.id.progressFill)
+        if (progressFill != null) {
+            val width = (view.width * progressValue).toInt()
+            progressFill.layoutParams.width = width
+            progressFill.requestLayout()
+        }
+    }
+    
+    override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
+        val view = convertView ?: LayoutInflater.from(context).inflate(
+            R.layout.history_item, parent, false
+        )
+        
+        val textView = view.findViewById<TextView>(R.id.tvHistoryItem)
+        val progressFill = view.findViewById<View>(R.id.progressFill)
+        val waveformContainer = view.findViewById<LinearLayout>(R.id.waveformContainer)
+        
+        val item = items[position]
+        
+        // Формируем текст
+        val prefix = if (position == playingPosition) "▶ " else ""
+        textView.text = "$prefix${item.fileName}"
+        
+        // Настройка цвета - ИСПРАВЛЕНО
+        if (position == playingPosition) {
+            progressFill.setBackgroundColor(0xFF4CAF50.toInt()) // Зеленый с полной непрозрачностью
+            textView.setTextColor(0xFFFFFFFF.toInt()) // Белый
+            textView.setShadowLayer(2f, 1f, 1f, 0xCC000000.toInt())
+        } else {
+            progressFill.setBackgroundColor(0x334CAF50.toInt()) // Полупрозрачный зеленый
+            textView.setTextColor(0xFF333333.toInt()) // Темно-серый
+            textView.setShadowLayer(0f, 0f, 0f, 0)
+        }
+        
+        // Рисуем волновую форму
+        drawWaveform(waveformContainer, position)
+        
+        // Обновляем прогресс
+        val currentProgress = if (position == playingPosition) progress else 0f
+        val width = (view.width * currentProgress).toInt()
+        progressFill.layoutParams.width = width
+        progressFill.requestLayout()
+        
+        return view
+    }
+    
+    private fun drawWaveform(container: LinearLayout, position: Int) {
+        container.removeAllViews()
+        
+        // Получаем данные волны для этого трека
+        val waveData = getWaveformForItem(items[position])
+        
+        if (waveData == null || waveData.isEmpty()) {
+            // Если данных нет, показываем простой фон
+            val dummyView = View(context).apply {
+                layoutParams = LinearLayout.LayoutParams(
+                    0,
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    1f
+                )
+            }
+            container.addView(dummyView)
+            return
+        }
+        
+        // Создаем столбцы
+        val maxHeight = 60 // Максимальная высота столбца в dp
+        
+        // Преобразуем dp в пиксели
+        val density = context.resources.displayMetrics.density
+        val maxHeightPx = (maxHeight * density).toInt()
+        
+        for (i in waveData.indices) {
+            val value = waveData[i]
+            val height = (value * maxHeightPx).toInt()
+            
+            val bar = View(context).apply {
+                layoutParams = LinearLayout.LayoutParams(
+                    0,
+                    height.coerceAtLeast(2), // Минимальная высота 2px чтобы столбцы были видны
+                    1f
+                )
+                
+                // Цвет зависит от позиции (активный/неактивный) - ИСПРАВЛЕНО
+                if (position == playingPosition) {
+                    setBackgroundColor(0xFF4CAF50.toInt()) // Зеленый
+                } else {
+                    setBackgroundColor(0x666666.toInt()) // Серый
+                }
+                
+                // Немного закругляем углы
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                    outlineProvider = null
+                }
+            }
+            
+            container.addView(bar)
+        }
+    }
+    
+    override fun getItem(position: Int): HistoryItem {
+        return items[position]
+    }
+    
+    override fun getCount(): Int {
+        return items.size
+    }
+} 
     
     // ============ ИЗВЛЕЧЕНИЕ ВОЛНОВОЙ ФОРМЫ ============
     
