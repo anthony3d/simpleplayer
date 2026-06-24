@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:padding="0dp">
+
+    <!-- Прогресс-бар (фон) -->
+    <View
+        android:id="@+id/progressBackground"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#e0e0e0"/>
+
+    <!-- Прогресс (заполнение) -->
+    <View
+        android:id="@+id/progressFill"
+        android:layout_width="0dp"
+        android:layout_height="match_parent"
+        android:background="#4CAF50"/>
+
+    <!-- Текст поверх прогресса -->
+    <TextView
+        android:id="@+id/tvHistoryItem"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:padding="12dp"
+        android:gravity="center_vertical"
+        android:textSize="14sp"
+        android:textColor="#333"
+        android:background="@android:color/transparent"/>
+</FrameLayout>
