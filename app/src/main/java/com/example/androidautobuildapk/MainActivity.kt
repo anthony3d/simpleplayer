@@ -12,7 +12,9 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.provider.OpenableColumns
+import android.view.LayoutInflater
 import android.view.View
+import android.view.ViewGroup
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
 import android.widget.Button
@@ -44,8 +46,10 @@ class MainActivity : AppCompatActivity() {
     private var currentUri: Uri? = null
     private var currentPauseSeconds = 5L
     private var checkPositionRunnable: Runnable? = null
+    private var progressRunnable: Runnable? = null
     private var currentFileName = ""
     private var currentUriString = ""
+    private var trackDuration = 0
     
     private val PICK_AUDIO_FILE = 1000
     private val MAX_HISTORY = 10
@@ -53,7 +57,7 @@ class MainActivity : AppCompatActivity() {
     
     private lateinit var sharedPrefs: SharedPreferences
     private var historyList = mutableListOf<HistoryItem>()
-    private var historyAdapter: ArrayAdapter<String>? = null
+    private var historyAdapter: HistoryAdapter? = null
     private var currentPlayingPosition = -1
     
     data class HistoryItem(
@@ -67,6 +71,87 @@ class MainActivity : AppCompatActivity() {
         val title: String,
         val album: String
     )
+    
+    // ============ КАСТОМНЫЙ АДАПТЕР ДЛЯ ИСТОРИИ С ПРОГРЕССОМ ============
+    
+    inner class HistoryAdapter(context: MainActivity, private val items: MutableList<HistoryItem>) :
+        ArrayAdapter<HistoryItem>(context, 0, items) {
+        
+        private var playingPosition = -1
+        private var progress = 0f // 0.0 - 1.0
+        
+        fun setPlayingPosition(position: Int) {
+            playingPosition = position
+            notifyDataSetChanged()
+        }
+        
+        fun updateProgress(progressValue: Float) {
+            progress = progressValue
+            // Обновляем только если есть активный трек
+            if (playingPosition >= 0) {
+                // Обновляем конкретную ячейку
+                val view = lvHistory.getChildAt(playingPosition - lvHistory.firstVisiblePosition)
+                if (view != null) {
+                    updateProgressForView(view, progressValue)
+                }
+            }
+        }
+        
+        private fun updateProgressForView(view: View, progressValue: Float) {
+            val progressFill = view.findViewById<View>(R.id.progressFill)
+            if (progressFill != null) {
+                val width = (view.width * progressValue).toInt()
+                progressFill.layoutParams.width = width
+                progressFill.requestLayout()
+            }
+        }
+        
+        override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
+            val view = convertView ?: LayoutInflater.from(context).inflate(
+                R.layout.history_item, parent, false
+            )
+            
+            val textView = view.findViewById<TextView>(R.id.tvHistoryItem)
+            val progressFill = view.findViewById<View>(R.id.progressFill)
+            val progressBackground = view.findViewById<View>(R.id.progressBackground)
+            
+            val item = items[position]
+            
+            // Формируем текст
+            val prefix = if (position == playingPosition) "▶ " else ""
+            textView.text = "$prefix${item.fileName}"
+            
+            // Настройка цвета в зависимости от статуса
+            if (position == playingPosition) {
+                progressFill.setBackgroundColor(0xFF4CAF50.toInt())
+                // Показываем прогресс
+                val currentProgress = if (position == playingPosition) progress else 0f
+                val width = (view.width * currentProgress).toInt()
+                progressFill.layoutParams.width = width
+                progressFill.visibility = View.VISIBLE
+                progressBackground.visibility = View.VISIBLE
+                textView.setTextColor(0xFFFFFFFF.toInt())
+            } else {
+                // Скрываем прогресс для неактивных треков
+                progressFill.layoutParams.width = 0
+                progressFill.visibility = View.GONE
+                progressBackground.visibility = View.GONE
+                textView.setTextColor(0xFF333333.toInt())
+            }
+            
+            return view
+        }
+        
+        override fun getItem(position: Int): HistoryItem {
+            return items[position]
+        }
+        
+        override fun getCount(): Int {
+            return items.size
+        }
+    }
+    
+    // ============ ОСНОВНЫЕ МЕТОДЫ ============
     
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -194,7 +279,6 @@ class MainActivity : AppCompatActivity() {
             title = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_TITLE) ?: "---"
             album = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ALBUM) ?: "---"
             
-            // Если заголовок не найден, используем имя файла
             if (title == "---") {
                 title = currentFileName.removeSuffix(".mp3").removeSuffix(".MP3")
             }
@@ -203,7 +287,6 @@ class MainActivity : AppCompatActivity() {
             
         } catch (e: Exception) {
             e.printStackTrace()
-            // Если ошибка, оставляем значения по умолчанию
         }
         
         return AudioTags(artist, title, album)
@@ -272,11 +355,9 @@ class MainActivity : AppCompatActivity() {
             currentUriString = item.uriString
             currentFileName = item.fileName
             
-            // Извлекаем и показываем теги
             val tags = extractTags(uri)
             displayTags(tags)
             
-            // Устанавливаем паузу из истории
             val pauseIndex = PAUSE_VALUES.indexOf(item.pauseSeconds)
             if (pauseIndex >= 0) {
                 spinnerPause.setSelection(pauseIndex)
@@ -330,35 +411,15 @@ class MainActivity : AppCompatActivity() {
     }
     
     private fun updateHistoryUI() {
-        val displayList = historyList.mapIndexed { index, item ->
-            val prefix = if (index == currentPlayingPosition) "▶ " else ""
-            "$prefix${item.fileName}"
-        }
-        
         if (historyAdapter == null) {
-            historyAdapter = ArrayAdapter(
-                this,
-                android.R.layout.simple_list_item_1,
-                displayList
-            )
+            historyAdapter = HistoryAdapter(this, historyList)
             lvHistory.adapter = historyAdapter
         } else {
-            historyAdapter?.clear()
-            historyAdapter?.addAll(displayList)
             historyAdapter?.notifyDataSetChanged()
         }
         
-        // Подсвечиваем активный трек
-        if (currentPlayingPosition >= 0 && currentPlayingPosition < lvHistory.childCount) {
-            for (i in 0 until lvHistory.childCount) {
-                val child = lvHistory.getChildAt(i)
-                if (i == currentPlayingPosition) {
-                    child?.setBackgroundColor(0x33FFFFFF)
-                } else {
-                    child?.setBackgroundColor(0x00000000)
-                }
-            }
-        }
+        // Устанавливаем позицию активного трека
+        historyAdapter?.setPlayingPosition(currentPlayingPosition)
     }
     
     // ============ ВОСПРОИЗВЕДЕНИЕ ============
@@ -379,7 +440,6 @@ class MainActivity : AppCompatActivity() {
             return
         }
         
-        // Если теги еще не загружены, извлекаем их
         if (layoutTags.visibility == View.GONE) {
             val tags = extractTags(currentUri!!)
             displayTags(tags)
@@ -404,14 +464,17 @@ class MainActivity : AppCompatActivity() {
             mediaPlayer = MediaPlayer().apply {
                 setDataSource(this@MainActivity, currentUri!!)
                 prepare()
+                trackDuration = duration
                 setVolume(1.0f, 1.0f)
                 start()
             }
             
             currentPlayingPosition = historyList.indexOfFirst { it.uriString == currentUriString }
+            historyAdapter?.setPlayingPosition(currentPlayingPosition)
             updateHistoryUI()
             
             startMonitoringPlayback()
+            startProgressUpdater()
             
         } catch (e: Exception) {
             e.printStackTrace()
@@ -420,6 +483,34 @@ class MainActivity : AppCompatActivity() {
             isPlaying = false
             updatePlayStopButton()
         }
+    }
+    
+    private fun startProgressUpdater() {
+        progressRunnable?.let { handler.removeCallbacks(it) }
+        
+        progressRunnable = object : Runnable {
+            override fun run() {
+                if (!isPlaying) return
+                
+                val player = mediaPlayer
+                if (player != null && player.isPlaying && trackDuration > 0) {
+                    val currentPosition = player.currentPosition
+                    val progress = currentPosition.toFloat() / trackDuration.toFloat()
+                    
+                    // Обновляем прогресс в адаптере
+                    historyAdapter?.updateProgress(progress)
+                    
+                    handler.postDelayed(this, 100)
+                } else if (player != null && !player.isPlaying && player.currentPosition > 0) {
+                    // Трек на паузе, показываем финальный прогресс
+                    // Ничего не делаем
+                } else {
+                    handler.postDelayed(this, 100)
+                }
+            }
+        }
+        
+        handler.post(progressRunnable!!)
     }
     
     private fun startMonitoringPlayback() {
@@ -459,6 +550,8 @@ class MainActivity : AppCompatActivity() {
         
         checkPositionRunnable?.let { handler.removeCallbacks(it) }
         checkPositionRunnable = null
+        progressRunnable?.let { handler.removeCallbacks(it) }
+        progressRunnable = null
         handler.removeCallbacksAndMessages(null)
         
         mediaPlayer?.let {
@@ -474,6 +567,10 @@ class MainActivity : AppCompatActivity() {
         runOnUiThread {
             tvStatus.text = "⏹ Остановлено"
             updatePlayStopButton()
+            // Сбрасываем прогресс
+            historyAdapter?.updateProgress(0f)
+            historyAdapter?.setPlayingPosition(-1)
+            currentPlayingPosition = -1
             updateHistoryUI()
         }
     }
