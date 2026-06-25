@@ -56,7 +56,7 @@ class MainActivity : AppCompatActivity() {
     private val PICK_AUDIO_FILE = 1000
     private val MAX_HISTORY = 10
     private val PAUSE_VALUES = listOf(2L, 5L, 10L, 20L, 30L)
-    private val WAVEFORM_COLUMNS = 200 // Увеличено до 200 столбцов
+    private val WAVEFORM_COLUMNS = 400 // Увеличено до 200 столбцов
     
     private lateinit var sharedPrefs: SharedPreferences
     private var historyList = mutableListOf<HistoryItem>()
