@@ -4,6 +4,9 @@ import android.Manifest
 import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
+import android.media.MediaCodec
+import android.media.MediaExtractor
+import android.media.MediaFormat
 import android.media.MediaMetadataRetriever
 import android.media.MediaPlayer
 import android.net.Uri
@@ -12,6 +15,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.provider.OpenableColumns
+import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -28,6 +32,9 @@ import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.File
+import java.io.FileOutputStream
+import java.nio.ByteBuffer
 
 class MainActivity : AppCompatActivity() {
     
@@ -51,17 +58,19 @@ class MainActivity : AppCompatActivity() {
     private var currentFileName = ""
     private var currentUriString = ""
     private var trackDuration = 0
-    private var waveformData: FloatArray? = null
     
     private val PICK_AUDIO_FILE = 1000
     private val MAX_HISTORY = 10
     private val PAUSE_VALUES = listOf(2L, 5L, 10L, 20L, 30L)
-    private val WAVEFORM_COLUMNS = 400 // Увеличено до 200 столбцов
+    private val WAVEFORM_COLUMNS = 200
     
     private lateinit var sharedPrefs: SharedPreferences
     private var historyList = mutableListOf<HistoryItem>()
     private var historyAdapter: HistoryAdapter? = null
     private var currentPlayingPosition = -1
+    
+    // Кеш для волновых форм
+    private val waveformCache = mutableMapOf<String, FloatArray>()
     
     data class HistoryItem(
         val fileName: String,
@@ -148,7 +157,6 @@ class MainActivity : AppCompatActivity() {
         private fun drawWaveform(container: LinearLayout, position: Int) {
             container.removeAllViews()
             
-            // Получаем данные волны для этого трека
             val waveData = getWaveformForItem(items[position])
             
             if (waveData == null || waveData.isEmpty()) {
@@ -163,14 +171,9 @@ class MainActivity : AppCompatActivity() {
                 return
             }
             
-            // Создаем столбцы
-            val maxHeight = 60 // Максимальная высота столбца в dp
-            
-            // Преобразуем dp в пиксели
+            val maxHeight = 60
             val density = context.resources.displayMetrics.density
             val maxHeightPx = (maxHeight * density).toInt()
-            
-            // Для 200 столбцов делаем их тоньше
             val barWidth = 1f / waveData.size
             
             for (i in waveData.indices) {
@@ -184,7 +187,6 @@ class MainActivity : AppCompatActivity() {
                         barWidth
                     )
                     
-                    // Цвет зависит от позиции (активный/неактивный)
                     if (position == playingPosition) {
                         setBackgroundColor(0xFF4CAF50.toInt())
                     } else {
@@ -205,79 +207,195 @@ class MainActivity : AppCompatActivity() {
         }
     }
     
-    // ============ ИЗВЛЕЧЕНИЕ ВОЛНОВОЙ ФОРМЫ ============
+    // ============ ИЗВЛЕЧЕНИЕ РЕАЛЬНОЙ ВОЛНОВОЙ ФОРМЫ ============
     
     private fun getWaveformForItem(item: HistoryItem): FloatArray? {
-        // Кешируем волновую форму для URI
-        if (item.uriString == currentUriString && waveformData != null) {
-            return waveformData
+        // Проверяем кеш
+        if (waveformCache.containsKey(item.uriString)) {
+            return waveformCache[item.uriString]
         }
         
-        // Пытаемся извлечь из файла
+        // Извлекаем реальную волновую форму
         try {
             val uri = Uri.parse(item.uriString)
-            val retriever = MediaMetadataRetriever()
-            retriever.setDataSource(this, uri)
+            val waveform = extractRealWaveform(uri)
             
-            val duration = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
-                ?.toLongOrNull() ?: 30000
+            if (waveform != null && waveform.isNotEmpty()) {
+                waveformCache[item.uriString] = waveform
+                return waveform
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+        
+        // Если не удалось, возвращаем null
+        return null
+    }
+    
+    private fun extractRealWaveform(uri: Uri): FloatArray? {
+        var extractor: MediaExtractor? = null
+        var decoder: MediaCodec? = null
+        
+        try {
+            extractor = MediaExtractor()
+            extractor.setDataSource(this, uri, null)
             
-            retriever.release()
+            // Находим аудио-трек
+            var audioTrackIndex = -1
+            var audioFormat: MediaFormat? = null
             
-            // Генерируем реалистичную волновую форму на основе длительности
-            return generateWaveform(duration)
+            for (i in 0 until extractor.trackCount) {
+                val format = extractor.getTrackFormat(i)
+                val mime = format.getString(MediaFormat.KEY_MIME)
+                if (mime?.startsWith("audio/") == true) {
+                    audioTrackIndex = i
+                    audioFormat = format
+                    break
+                }
+            }
+            
+            if (audioTrackIndex == -1 || audioFormat == null) {
+                return null
+            }
+            
+            extractor.selectTrack(audioTrackIndex)
+            
+            // Создаем декодер
+            val mime = audioFormat.getString(MediaFormat.KEY_MIME) ?: return null
+            decoder = MediaCodec.createDecoderByType(mime)
+            decoder.configure(audioFormat, null, null, 0)
+            decoder.start()
+            
+            // Буферы для декодирования
+            val inputBuffers = decoder.inputBuffers
+            val outputBuffers = decoder.outputBuffers
+            val bufferInfo = MediaCodec.BufferInfo()
+            
+            var isEos = false
+            var allSamples = mutableListOf<Float>()
+            var sampleRate = audioFormat.getInteger(MediaFormat.KEY_SAMPLE_RATE)
+            var channelCount = audioFormat.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
+            
+            // Читаем и декодируем аудио
+            while (!isEos) {
+                // Входные данные
+                val inputIndex = decoder.dequeueInputBuffer(10000)
+                if (inputIndex >= 0) {
+                    val inputBuffer = inputBuffers[inputIndex]
+                    val sampleSize = extractor.readSampleData(inputBuffer, 0)
+                    
+                    if (sampleSize < 0) {
+                        decoder.queueInputBuffer(inputIndex, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                        isEos = true
+                    } else {
+                        val presentationTime = extractor.sampleTime
+                        decoder.queueInputBuffer(inputIndex, 0, sampleSize, presentationTime, 0)
+                        extractor.advance()
+                    }
+                }
+                
+                // Выходные данные
+                val outputIndex = decoder.dequeueOutputBuffer(bufferInfo, 10000)
+                if (outputIndex >= 0) {
+                    val outputBuffer = outputBuffers[outputIndex]
+                    
+                    if (bufferInfo.size > 0) {
+                        // Конвертируем байты в PCM
+                        val pcmData = decodePCM(outputBuffer, bufferInfo)
+                        allSamples.addAll(pcmData)
+                    }
+                    
+                    decoder.releaseOutputBuffer(outputIndex, false)
+                    
+                    if (bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) {
+                        isEos = true
+                    }
+                }
+            }
+            
+            decoder.stop()
+            decoder.release()
+            extractor.release()
+            
+            // Если нет данных, возвращаем null
+            if (allSamples.isEmpty()) {
+                return null
+            }
+            
+            // Создаем волновую форму
+            return createWaveformFromSamples(allSamples, sampleRate)
             
         } catch (e: Exception) {
             e.printStackTrace()
-            return generateRandomWaveform()
+            try {
+                decoder?.stop()
+                decoder?.release()
+                extractor?.release()
+            } catch (ex: Exception) {
+                ex.printStackTrace()
+            }
+            return null
         }
     }
     
-    private fun generateWaveform(durationMs: Long): FloatArray {
+    private fun decodePCM(buffer: ByteBuffer, bufferInfo: MediaCodec.BufferInfo): List<Float> {
+        val samples = mutableListOf<Float>()
+        val bytes = ByteArray(bufferInfo.size)
+        buffer.get(bytes)
+        
+        // Предполагаем 16-bit PCM (наиболее распространенный)
+        for (i in 0 until bytes.size step 2) {
+            if (i + 1 < bytes.size) {
+                // Конвертируем 2 байта в short (16-bit)
+                val sample = ((bytes[i + 1].toInt() shl 8) or (bytes[i].toInt() and 0xFF))
+                val normalized = sample.toFloat() / Short.MAX_VALUE
+                samples.add(normalized)
+            }
+        }
+        
+        return samples
+    }
+    
+    private fun createWaveformFromSamples(samples: List<Float>, sampleRate: Int): FloatArray {
+        if (samples.isEmpty()) return FloatArray(WAVEFORM_COLUMNS) { 0.1f }
+        
         val columns = WAVEFORM_COLUMNS
         val result = FloatArray(columns)
         
-        // Используем длительность как seed для генерации паттерна
-        val seed = (durationMs / 1000).toInt()
-        val random = java.util.Random(seed.toLong())
-        
-        // Генерируем волну с реалистичным паттерном (интро, основной пик, аутро)
-        val pattern = FloatArray(columns)
-        for (i in 0 until columns) {
-            // Синусоидальная огибающая
-            val envelope = Math.sin(i.toDouble() / columns * Math.PI).toFloat()
-            // Случайный шум с разной амплитудой
-            val noise = (0.3f + random.nextFloat() * 0.7f)
-            // Добавляем больше вариаций для детализации
-            val variation = Math.sin(i.toDouble() * 0.3).toFloat() * 0.3f + 0.7f
-            // Комбинируем
-            pattern[i] = envelope * noise * variation
+        // Количество сэмплов на столбец
+        val samplesPerColumn = samples.size / columns
+        if (samplesPerColumn == 0) {
+            // Если сэмплов меньше чем столбцов
+            for (i in 0 until columns) {
+                val index = (i * samples.size.toFloat() / columns).toInt()
+                result[i] = samples.getOrElse(index) { 0.1f }
+            }
+            return result
         }
         
-        // Добавляем небольшие пики для реалистичности
-        for (i in 10 until columns - 10 step 3) {
-            val peak = random.nextFloat() * 0.3f
-            pattern[i] = (pattern[i] + peak).coerceAtMost(1f)
+        // Для каждого столбца берем пиковое значение
+        for (i in 0 until columns) {
+            val start = i * samplesPerColumn
+            val end = (i + 1) * samplesPerColumn
+            var max = 0f
+            
+            for (j in start until end.coerceAtMost(samples.size)) {
+                val value = Math.abs(samples[j])
+                if (value > max) {
+                    max = value
+                }
+            }
+            
+            // Минимальная амплитуда для видимости
+            result[i] = max.coerceAtLeast(0.05f)
         }
         
         // Нормализуем
-        val max = pattern.maxOrNull() ?: 1f
-        for (i in pattern.indices) {
-            result[i] = pattern[i] / max
-        }
-        
-        return result
-    }
-    
-    private fun generateRandomWaveform(): FloatArray {
-        val columns = WAVEFORM_COLUMNS
-        val result = FloatArray(columns)
-        val random = java.util.Random()
-        
-        for (i in 0 until columns) {
-            val base = 0.2f + random.nextFloat() * 0.8f
-            val smooth = Math.sin(i.toDouble() * 0.05).toFloat() * 0.2f + 0.8f
-            result[i] = base * smooth
+        val max = result.maxOrNull() ?: 1f
+        if (max > 0) {
+            for (i in result.indices) {
+                result[i] = result[i] / max
+            }
         }
         
         return result
@@ -285,19 +403,12 @@ class MainActivity : AppCompatActivity() {
     
     private fun extractWaveform(uri: Uri) {
         try {
-            val retriever = MediaMetadataRetriever()
-            retriever.setDataSource(this, uri)
-            
-            val duration = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
-                ?.toLongOrNull() ?: 30000
-            
-            retriever.release()
-            
-            waveformData = generateWaveform(duration)
-            
+            val waveform = extractRealWaveform(uri)
+            if (waveform != null && waveform.isNotEmpty()) {
+                waveformCache[uri.toString()] = waveform
+            }
         } catch (e: Exception) {
             e.printStackTrace()
-            waveformData = generateRandomWaveform()
         }
     }
     
@@ -389,7 +500,7 @@ class MainActivity : AppCompatActivity() {
                 val tags = extractTags(uri)
                 displayTags(tags)
                 
-                // Извлекаем волновую форму
+                // Извлекаем реальную волновую форму
                 extractWaveform(uri)
                 
                 tvStatus.text = "Выбран: $currentFileName"
@@ -597,10 +708,6 @@ class MainActivity : AppCompatActivity() {
         if (layoutTags.visibility == View.GONE) {
             val tags = extractTags(currentUri!!)
             displayTags(tags)
-        }
-        
-        if (waveformData == null) {
-            extractWaveform(currentUri!!)
         }
         
         stopPlaying()
