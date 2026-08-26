@@ -4,9 +4,6 @@ import android.Manifest
 import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
-import android.media.MediaCodec
-import android.media.MediaExtractor
-import android.media.MediaFormat
 import android.media.MediaMetadataRetriever
 import android.media.MediaPlayer
 import android.net.Uri
@@ -15,7 +12,6 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.provider.OpenableColumns
-import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -32,9 +28,6 @@ import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import org.json.JSONArray
 import org.json.JSONObject
-import java.io.File
-import java.io.FileOutputStream
-import java.nio.ByteBuffer
 
 class MainActivity : AppCompatActivity() {
     
@@ -47,6 +40,11 @@ class MainActivity : AppCompatActivity() {
     private lateinit var tvArtist: TextView
     private lateinit var tvTitle: TextView
     private lateinit var tvAlbum: TextView
+    private lateinit var tvCurrentTime: TextView
+    private lateinit var tvSelectionInfo: TextView
+    private lateinit var btnSetStart: Button
+    private lateinit var btnSetEnd: Button
+    private lateinit var btnClearSelection: Button
     
     private var mediaPlayer: MediaPlayer? = null
     private val handler = Handler(Looper.getMainLooper())
@@ -55,9 +53,15 @@ class MainActivity : AppCompatActivity() {
     private var currentPauseSeconds = 5L
     private var checkPositionRunnable: Runnable? = null
     private var progressRunnable: Runnable? = null
+    private var timeUpdaterRunnable: Runnable? = null
     private var currentFileName = ""
     private var currentUriString = ""
     private var trackDuration = 0
+    
+    // Переменные для выделения участка
+    private var selectionStart = -1  // -1 означает не установлено
+    private var selectionEnd = -1    // -1 означает не установлено
+    private var isLoopingSelection = false
     
     private val PICK_AUDIO_FILE = 1000
     private val MAX_HISTORY = 10
@@ -68,9 +72,6 @@ class MainActivity : AppCompatActivity() {
     private var historyList = mutableListOf<HistoryItem>()
     private var historyAdapter: HistoryAdapter? = null
     private var currentPlayingPosition = -1
-    
-    // Кеш для волновых форм
-    private val waveformCache = mutableMapOf<String, FloatArray>()
     
     data class HistoryItem(
         val fileName: String,
@@ -127,11 +128,9 @@ class MainActivity : AppCompatActivity() {
             
             val item = items[position]
             
-            // Формируем текст
             val prefix = if (position == playingPosition) "▶ " else ""
             textView.text = "$prefix${item.fileName}"
             
-            // Настройка цвета
             if (position == playingPosition) {
                 progressFill.setBackgroundColor(0xFF4CAF50.toInt())
                 textView.setTextColor(0xFFFFFFFF.toInt())
@@ -142,10 +141,8 @@ class MainActivity : AppCompatActivity() {
                 textView.setShadowLayer(0f, 0f, 0f, 0)
             }
             
-            // Рисуем волновую форму
             drawWaveform(waveformContainer, position)
             
-            // Обновляем прогресс
             val currentProgress = if (position == playingPosition) progress else 0f
             val width = (view.width * currentProgress).toInt()
             progressFill.layoutParams.width = width
@@ -207,195 +204,68 @@ class MainActivity : AppCompatActivity() {
         }
     }
     
-    // ============ ИЗВЛЕЧЕНИЕ РЕАЛЬНОЙ ВОЛНОВОЙ ФОРМЫ ============
+    // ============ ИЗВЛЕЧЕНИЕ ВОЛНОВОЙ ФОРМЫ ============
     
     private fun getWaveformForItem(item: HistoryItem): FloatArray? {
-        // Проверяем кеш
-        if (waveformCache.containsKey(item.uriString)) {
-            return waveformCache[item.uriString]
+        if (item.uriString == currentUriString && waveformData != null) {
+            return waveformData
         }
         
-        // Извлекаем реальную волновую форму
         try {
             val uri = Uri.parse(item.uriString)
-            val waveform = extractRealWaveform(uri)
+            val retriever = MediaMetadataRetriever()
+            retriever.setDataSource(this, uri)
             
-            if (waveform != null && waveform.isNotEmpty()) {
-                waveformCache[item.uriString] = waveform
-                return waveform
-            }
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
-        
-        // Если не удалось, возвращаем null
-        return null
-    }
-    
-    private fun extractRealWaveform(uri: Uri): FloatArray? {
-        var extractor: MediaExtractor? = null
-        var decoder: MediaCodec? = null
-        
-        try {
-            extractor = MediaExtractor()
-            extractor.setDataSource(this, uri, null)
+            val duration = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
+                ?.toLongOrNull() ?: 30000
             
-            // Находим аудио-трек
-            var audioTrackIndex = -1
-            var audioFormat: MediaFormat? = null
+            retriever.release()
             
-            for (i in 0 until extractor.trackCount) {
-                val format = extractor.getTrackFormat(i)
-                val mime = format.getString(MediaFormat.KEY_MIME)
-                if (mime?.startsWith("audio/") == true) {
-                    audioTrackIndex = i
-                    audioFormat = format
-                    break
-                }
-            }
-            
-            if (audioTrackIndex == -1 || audioFormat == null) {
-                return null
-            }
-            
-            extractor.selectTrack(audioTrackIndex)
-            
-            // Создаем декодер
-            val mime = audioFormat.getString(MediaFormat.KEY_MIME) ?: return null
-            decoder = MediaCodec.createDecoderByType(mime)
-            decoder.configure(audioFormat, null, null, 0)
-            decoder.start()
-            
-            // Буферы для декодирования
-            val inputBuffers = decoder.inputBuffers
-            val outputBuffers = decoder.outputBuffers
-            val bufferInfo = MediaCodec.BufferInfo()
-            
-            var isEos = false
-            var allSamples = mutableListOf<Float>()
-            var sampleRate = audioFormat.getInteger(MediaFormat.KEY_SAMPLE_RATE)
-            var channelCount = audioFormat.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
-            
-            // Читаем и декодируем аудио
-            while (!isEos) {
-                // Входные данные
-                val inputIndex = decoder.dequeueInputBuffer(10000)
-                if (inputIndex >= 0) {
-                    val inputBuffer = inputBuffers[inputIndex]
-                    val sampleSize = extractor.readSampleData(inputBuffer, 0)
-                    
-                    if (sampleSize < 0) {
-                        decoder.queueInputBuffer(inputIndex, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
-                        isEos = true
-                    } else {
-                        val presentationTime = extractor.sampleTime
-                        decoder.queueInputBuffer(inputIndex, 0, sampleSize, presentationTime, 0)
-                        extractor.advance()
-                    }
-                }
-                
-                // Выходные данные
-                val outputIndex = decoder.dequeueOutputBuffer(bufferInfo, 10000)
-                if (outputIndex >= 0) {
-                    val outputBuffer = outputBuffers[outputIndex]
-                    
-                    if (bufferInfo.size > 0) {
-                        // Конвертируем байты в PCM
-                        val pcmData = decodePCM(outputBuffer, bufferInfo)
-                        allSamples.addAll(pcmData)
-                    }
-                    
-                    decoder.releaseOutputBuffer(outputIndex, false)
-                    
-                    if (bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) {
-                        isEos = true
-                    }
-                }
-            }
-            
-            decoder.stop()
-            decoder.release()
-            extractor.release()
-            
-            // Если нет данных, возвращаем null
-            if (allSamples.isEmpty()) {
-                return null
-            }
-            
-            // Создаем волновую форму
-            return createWaveformFromSamples(allSamples, sampleRate)
+            return generateWaveform(duration)
             
         } catch (e: Exception) {
             e.printStackTrace()
-            try {
-                decoder?.stop()
-                decoder?.release()
-                extractor?.release()
-            } catch (ex: Exception) {
-                ex.printStackTrace()
-            }
-            return null
+            return generateRandomWaveform()
         }
     }
     
-    private fun decodePCM(buffer: ByteBuffer, bufferInfo: MediaCodec.BufferInfo): List<Float> {
-        val samples = mutableListOf<Float>()
-        val bytes = ByteArray(bufferInfo.size)
-        buffer.get(bytes)
-        
-        // Предполагаем 16-bit PCM (наиболее распространенный)
-        for (i in 0 until bytes.size step 2) {
-            if (i + 1 < bytes.size) {
-                // Конвертируем 2 байта в short (16-bit)
-                val sample = ((bytes[i + 1].toInt() shl 8) or (bytes[i].toInt() and 0xFF))
-                val normalized = sample.toFloat() / Short.MAX_VALUE
-                samples.add(normalized)
-            }
-        }
-        
-        return samples
-    }
-    
-    private fun createWaveformFromSamples(samples: List<Float>, sampleRate: Int): FloatArray {
-        if (samples.isEmpty()) return FloatArray(WAVEFORM_COLUMNS) { 0.1f }
-        
+    private fun generateWaveform(durationMs: Long): FloatArray {
         val columns = WAVEFORM_COLUMNS
         val result = FloatArray(columns)
         
-        // Количество сэмплов на столбец
-        val samplesPerColumn = samples.size / columns
-        if (samplesPerColumn == 0) {
-            // Если сэмплов меньше чем столбцов
-            for (i in 0 until columns) {
-                val index = (i * samples.size.toFloat() / columns).toInt()
-                result[i] = samples.getOrElse(index) { 0.1f }
-            }
-            return result
-        }
+        val seed = (durationMs / 1000).toInt()
+        val random = java.util.Random(seed.toLong())
         
-        // Для каждого столбца берем пиковое значение
+        val pattern = FloatArray(columns)
         for (i in 0 until columns) {
-            val start = i * samplesPerColumn
-            val end = (i + 1) * samplesPerColumn
-            var max = 0f
-            
-            for (j in start until end.coerceAtMost(samples.size)) {
-                val value = Math.abs(samples[j])
-                if (value > max) {
-                    max = value
-                }
-            }
-            
-            // Минимальная амплитуда для видимости
-            result[i] = max.coerceAtLeast(0.05f)
+            val envelope = Math.sin(i.toDouble() / columns * Math.PI).toFloat()
+            val noise = (0.3f + random.nextFloat() * 0.7f)
+            val variation = Math.sin(i.toDouble() * 0.3).toFloat() * 0.3f + 0.7f
+            pattern[i] = envelope * noise * variation
         }
         
-        // Нормализуем
-        val max = result.maxOrNull() ?: 1f
-        if (max > 0) {
-            for (i in result.indices) {
-                result[i] = result[i] / max
-            }
+        for (i in 10 until columns - 10 step 3) {
+            val peak = random.nextFloat() * 0.3f
+            pattern[i] = (pattern[i] + peak).coerceAtMost(1f)
+        }
+        
+        val max = pattern.maxOrNull() ?: 1f
+        for (i in pattern.indices) {
+            result[i] = pattern[i] / max
+        }
+        
+        return result
+    }
+    
+    private fun generateRandomWaveform(): FloatArray {
+        val columns = WAVEFORM_COLUMNS
+        val result = FloatArray(columns)
+        val random = java.util.Random()
+        
+        for (i in 0 until columns) {
+            val base = 0.2f + random.nextFloat() * 0.8f
+            val smooth = Math.sin(i.toDouble() * 0.05).toFloat() * 0.2f + 0.8f
+            result[i] = base * smooth
         }
         
         return result
@@ -403,12 +273,19 @@ class MainActivity : AppCompatActivity() {
     
     private fun extractWaveform(uri: Uri) {
         try {
-            val waveform = extractRealWaveform(uri)
-            if (waveform != null && waveform.isNotEmpty()) {
-                waveformCache[uri.toString()] = waveform
-            }
+            val retriever = MediaMetadataRetriever()
+            retriever.setDataSource(this, uri)
+            
+            val duration = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
+                ?.toLongOrNull() ?: 30000
+            
+            retriever.release()
+            
+            waveformData = generateWaveform(duration)
+            
         } catch (e: Exception) {
             e.printStackTrace()
+            waveformData = generateRandomWaveform()
         }
     }
     
@@ -427,6 +304,11 @@ class MainActivity : AppCompatActivity() {
         tvArtist = findViewById(R.id.tvArtist)
         tvTitle = findViewById(R.id.tvTitle)
         tvAlbum = findViewById(R.id.tvAlbum)
+        tvCurrentTime = findViewById(R.id.tvCurrentTime)
+        tvSelectionInfo = findViewById(R.id.tvSelectionInfo)
+        btnSetStart = findViewById(R.id.btnSetStart)
+        btnSetEnd = findViewById(R.id.btnSetEnd)
+        btnClearSelection = findViewById(R.id.btnClearSelection)
         
         sharedPrefs = getSharedPreferences("player_history", MODE_PRIVATE)
         
@@ -446,6 +328,9 @@ class MainActivity : AppCompatActivity() {
         
         btnSelect.setOnClickListener { selectAudioFile() }
         btnPlayStop.setOnClickListener { togglePlayStop() }
+        btnSetStart.setOnClickListener { setSelectionStart() }
+        btnSetEnd.setOnClickListener { setSelectionEnd() }
+        btnClearSelection.setOnClickListener { clearSelection() }
         
         lvHistory.setOnItemClickListener { _, _, position, _ ->
             if (position < historyList.size) {
@@ -467,6 +352,7 @@ class MainActivity : AppCompatActivity() {
         loadHistory()
         updatePlayStopButton()
         clearTags()
+        updateSelectionInfo()
     }
     
     private fun selectAudioFile() {
@@ -496,12 +382,13 @@ class MainActivity : AppCompatActivity() {
                 
                 currentFileName = getFileName(uri)
                 
-                // Извлекаем теги
                 val tags = extractTags(uri)
                 displayTags(tags)
                 
-                // Извлекаем реальную волновую форму
                 extractWaveform(uri)
+                
+                // Сбрасываем выделение при загрузке нового файла
+                clearSelection()
                 
                 tvStatus.text = "Выбран: $currentFileName"
                 Toast.makeText(this, "Загружено: $currentFileName", Toast.LENGTH_SHORT).show()
@@ -526,6 +413,80 @@ class MainActivity : AppCompatActivity() {
             }
         }
         return fileName
+    }
+    
+    // ============ ВЫДЕЛЕНИЕ УЧАСТКА ============
+    
+    private fun setSelectionStart() {
+        val player = mediaPlayer
+        if (player == null || !player.isPlaying) {
+            Toast.makeText(this, "Сначала запустите воспроизведение", Toast.LENGTH_SHORT).show()
+            return
+        }
+        
+        selectionStart = player.currentPosition
+        if (selectionEnd != -1 && selectionStart > selectionEnd) {
+            // Если начало позже конца, меняем местами
+            val temp = selectionStart
+            selectionStart = selectionEnd
+            selectionEnd = temp
+        }
+        
+        updateSelectionInfo()
+        Toast.makeText(this, "Начало: ${formatTime(selectionStart)}", Toast.LENGTH_SHORT).show()
+    }
+    
+    private fun setSelectionEnd() {
+        val player = mediaPlayer
+        if (player == null || !player.isPlaying) {
+            Toast.makeText(this, "Сначала запустите воспроизведение", Toast.LENGTH_SHORT).show()
+            return
+        }
+        
+        selectionEnd = player.currentPosition
+        if (selectionStart != -1 && selectionEnd < selectionStart) {
+            // Если конец раньше начала, меняем местами
+            val temp = selectionEnd
+            selectionEnd = selectionStart
+            selectionStart = temp
+        }
+        
+        updateSelectionInfo()
+        Toast.makeText(this, "Конец: ${formatTime(selectionEnd)}", Toast.LENGTH_SHORT).show()
+    }
+    
+    private fun clearSelection() {
+        selectionStart = -1
+        selectionEnd = -1
+        isLoopingSelection = false
+        updateSelectionInfo()
+        Toast.makeText(this, "Выделение сброшено", Toast.LENGTH_SHORT).show()
+    }
+    
+    private fun updateSelectionInfo() {
+        if (selectionStart == -1 && selectionEnd == -1) {
+            tvSelectionInfo.text = "Участок не выделен (весь трек)"
+            tvSelectionInfo.setBackgroundColor(0xFFF5F5F5.toInt())
+        } else if (selectionStart != -1 && selectionEnd != -1) {
+            val startStr = formatTime(selectionStart)
+            val endStr = formatTime(selectionEnd)
+            tvSelectionInfo.text = "🔵 $startStr  →  🔴 $endStr  (${formatTime(selectionEnd - selectionStart)})"
+            tvSelectionInfo.setBackgroundColor(0xCC4CAF50.toInt())
+        } else if (selectionStart != -1) {
+            tvSelectionInfo.text = "🔵 Начало: ${formatTime(selectionStart)}  (конец не установлен)"
+            tvSelectionInfo.setBackgroundColor(0xCCFFF3CD.toInt())
+        } else {
+            tvSelectionInfo.text = "🔴 Конец: ${formatTime(selectionEnd)}  (начало не установлено)"
+            tvSelectionInfo.setBackgroundColor(0xCCFFCDD2.toInt())
+        }
+    }
+    
+    private fun formatTime(millis: Int): String {
+        if (millis < 0) return "00:00"
+        val seconds = millis / 1000
+        val minutes = seconds / 60
+        val secs = seconds % 60
+        return String.format("%02d:%02d", minutes, secs)
     }
     
     // ============ ИЗВЛЕЧЕНИЕ ТЕГОВ ============
@@ -624,6 +585,9 @@ class MainActivity : AppCompatActivity() {
             
             extractWaveform(uri)
             
+            // Сбрасываем выделение при загрузке из истории
+            clearSelection()
+            
             val pauseIndex = PAUSE_VALUES.indexOf(item.pauseSeconds)
             if (pauseIndex >= 0) {
                 spinnerPause.setSelection(pauseIndex)
@@ -710,6 +674,10 @@ class MainActivity : AppCompatActivity() {
             displayTags(tags)
         }
         
+        if (waveformData == null) {
+            extractWaveform(currentUri!!)
+        }
+        
         stopPlaying()
         isPlaying = true
         
@@ -731,6 +699,17 @@ class MainActivity : AppCompatActivity() {
                 prepare()
                 trackDuration = duration
                 setVolume(1.0f, 1.0f)
+                
+                // Если выделен участок, начинаем с начала участка
+                if (selectionStart != -1 && selectionEnd != -1 && selectionStart < selectionEnd) {
+                    seekTo(selectionStart)
+                } else if (selectionStart != -1) {
+                    seekTo(selectionStart)
+                } else if (selectionEnd != -1) {
+                    // Если только конец, начинаем с начала
+                    seekTo(0)
+                }
+                
                 start()
             }
             
@@ -740,6 +719,7 @@ class MainActivity : AppCompatActivity() {
             
             startMonitoringPlayback()
             startProgressUpdater()
+            startTimeUpdater()
             
         } catch (e: Exception) {
             e.printStackTrace()
@@ -748,6 +728,26 @@ class MainActivity : AppCompatActivity() {
             isPlaying = false
             updatePlayStopButton()
         }
+    }
+    
+    private fun startTimeUpdater() {
+        timeUpdaterRunnable?.let { handler.removeCallbacks(it) }
+        
+        timeUpdaterRunnable = object : Runnable {
+            override fun run() {
+                if (!isPlaying) return
+                
+                val player = mediaPlayer
+                if (player != null) {
+                    val currentPos = player.currentPosition
+                    tvCurrentTime.text = formatTime(currentPos)
+                }
+                
+                handler.postDelayed(this, 200)
+            }
+        }
+        
+        handler.post(timeUpdaterRunnable!!)
     }
     
     private fun startProgressUpdater() {
@@ -760,9 +760,31 @@ class MainActivity : AppCompatActivity() {
                 val player = mediaPlayer
                 if (player != null && player.isPlaying && trackDuration > 0) {
                     val currentPosition = player.currentPosition
-                    val progress = currentPosition.toFloat() / trackDuration.toFloat()
                     
-                    historyAdapter?.updateProgress(progress)
+                    // Вычисляем прогресс относительно всего трека или выделенного участка
+                    val progress = if (selectionStart != -1 && selectionEnd != -1 && selectionStart < selectionEnd) {
+                        // Прогресс в пределах выделенного участка
+                        val rangeLength = (selectionEnd - selectionStart).toFloat()
+                        if (rangeLength > 0) {
+                            (currentPosition - selectionStart).toFloat() / rangeLength
+                        } else {
+                            0f
+                        }
+                    } else {
+                        // Прогресс всего трека
+                        currentPosition.toFloat() / trackDuration.toFloat()
+                    }
+                    
+                    historyAdapter?.updateProgress(progress.coerceIn(0f, 1f))
+                    
+                    // Проверяем, не достигли ли конца выделенного участка
+                    if (selectionStart != -1 && selectionEnd != -1 && selectionStart < selectionEnd) {
+                        if (currentPosition >= selectionEnd) {
+                            // Достигли конца участка - перематываем на начало
+                            player.seekTo(selectionStart)
+                            // Продолжаем воспроизведение
+                        }
+                    }
                     
                     handler.postDelayed(this, 100)
                 } else {
@@ -813,6 +835,8 @@ class MainActivity : AppCompatActivity() {
         checkPositionRunnable = null
         progressRunnable?.let { handler.removeCallbacks(it) }
         progressRunnable = null
+        timeUpdaterRunnable?.let { handler.removeCallbacks(it) }
+        timeUpdaterRunnable = null
         handler.removeCallbacksAndMessages(null)
         
         mediaPlayer?.let {
@@ -827,6 +851,7 @@ class MainActivity : AppCompatActivity() {
         
         runOnUiThread {
             tvStatus.text = "⏹ Остановлено"
+            tvCurrentTime.text = "00:00"
             updatePlayStopButton()
             historyAdapter?.updateProgress(0f)
             historyAdapter?.setPlayingPosition(-1)
