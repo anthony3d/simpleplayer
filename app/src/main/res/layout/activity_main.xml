@@ -10,7 +10,7 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
-        android:layout_marginBottom="10dp">
+        android:layout_marginBottom="8dp">
 
         <Button
             android:id="@+id/btnSelect"
@@ -35,7 +35,63 @@
         android:layout_height="wrap_content"
         android:text="▶ Воспроизвести"
         android:textSize="16sp"
-        android:layout_marginBottom="10dp"/>
+        android:layout_marginBottom="8dp"/>
+
+    <!-- Блок выделения участка -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:layout_marginBottom="8dp"
+        android:gravity="center">
+
+        <TextView
+            android:id="@+id/tvCurrentTime"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="00:00"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:layout_marginEnd="10dp"/>
+
+        <Button
+            android:id="@+id/btnSetStart"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="🔵 Начало"
+            android:textSize="12sp"
+            android:layout_marginEnd="5dp"/>
+
+        <Button
+            android:id="@+id/btnSetEnd"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="🔴 Конец"
+            android:textSize="12sp"
+            android:layout_marginEnd="5dp"/>
+
+        <Button
+            android:id="@+id/btnClearSelection"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="🗑 Сброс"
+            android:textSize="12sp"/>
+    </LinearLayout>
+
+    <!-- Индикатор выделенного участка -->
+    <TextView
+        android:id="@+id/tvSelectionInfo"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Участок не выделен"
+        android:textSize="12sp"
+        android:gravity="center"
+        android:padding="4dp"
+        android:background="#f5f5f5"
+        android:layout_marginBottom="8dp"/>
 
     <!-- Блок с тегами -->
     <LinearLayout
@@ -45,15 +101,15 @@
         android:orientation="vertical"
         android:background="#f5f5f5"
         android:padding="10dp"
-        android:layout_marginBottom="10dp"
+        android:layout_marginBottom="8dp"
         android:visibility="gone">
 
         <TextView
             android:id="@+id/tvArtist"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Artist: ---"
-            android:textSize="14sp"
+            android:text="🎤 ---"
+            android:textSize="13sp"
             android:textStyle="bold"
             android:layout_marginBottom="2dp"/>
 
@@ -61,8 +117,8 @@
             android:id="@+id/tvTitle"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Title: ---"
-            android:textSize="14sp"
+            android:text="🎵 ---"
+            android:textSize="13sp"
             android:textStyle="bold"
             android:layout_marginBottom="2dp"/>
 
@@ -70,8 +126,8 @@
             android:id="@+id/tvAlbum"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Album: ---"
-            android:textSize="14sp"
+            android:text="💿 ---"
+            android:textSize="13sp"
             android:textStyle="bold"/>
     </LinearLayout>
 
