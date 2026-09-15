@@ -57,6 +57,7 @@ class MainActivity : AppCompatActivity() {
     private var currentFileName = ""
     private var currentUriString = ""
     private var trackDuration = 0
+    private var waveformData: FloatArray? = null
     
     // Переменные для выделения участка
     private var selectionStart = -1  // -1 означает не установлено
