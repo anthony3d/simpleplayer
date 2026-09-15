@@ -449,7 +449,14 @@ class MainActivity : AppCompatActivity() {
         }
         
         selectionEnd = player.currentPosition
-        if (selectionStart != -1 && selectionEnd < selectionStart) {
+        
+        // Если начало не установлено, ставим его на начало трека
+        if (selectionStart == -1) {
+            selectionStart = 0
+        }
+        
+        // Если конец раньше начала, меняем местами
+        if (selectionEnd < selectionStart) {
             val temp = selectionEnd
             selectionEnd = selectionStart
             selectionStart = temp
