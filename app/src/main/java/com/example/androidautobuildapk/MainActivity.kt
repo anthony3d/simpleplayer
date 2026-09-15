@@ -60,8 +60,8 @@ class MainActivity : AppCompatActivity() {
     private var waveformData: FloatArray? = null
     
     // Переменные для выделения участка
-    private var selectionStart = -1  // -1 означает не установлено
-    private var selectionEnd = -1    // -1 означает не установлено
+    private var selectionStart = -1
+    private var selectionEnd = -1
     private var isLoopingSelection = false
     
     private val PICK_AUDIO_FILE = 1000
@@ -77,7 +77,9 @@ class MainActivity : AppCompatActivity() {
     data class HistoryItem(
         val fileName: String,
         val uriString: String,
-        val pauseSeconds: Long
+        val pauseSeconds: Long,
+        val selectionStart: Int = -1,
+        val selectionEnd: Int = -1
     )
     
     data class AudioTags(
@@ -313,7 +315,6 @@ class MainActivity : AppCompatActivity() {
         
         sharedPrefs = getSharedPreferences("player_history", MODE_PRIVATE)
         
-        // Настройка спиннера
         val pauseOptions = resources.getStringArray(R.array.pause_options)
         val adapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, pauseOptions)
         adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
@@ -389,13 +390,16 @@ class MainActivity : AppCompatActivity() {
                 extractWaveform(uri)
                 
                 // Сбрасываем выделение при загрузке нового файла
-                clearSelection()
+                selectionStart = -1
+                selectionEnd = -1
+                isLoopingSelection = false
+                updateSelectionInfo()
                 
                 tvStatus.text = "Выбран: $currentFileName"
                 Toast.makeText(this, "Загружено: $currentFileName", Toast.LENGTH_SHORT).show()
                 
                 val pause = currentPauseSeconds
-                addToHistory(currentFileName, currentUriString, pause)
+                addToHistory(currentFileName, currentUriString, pause, selectionStart, selectionEnd)
                 
                 stopPlaying()
                 updatePlayStopButton()
@@ -427,12 +431,12 @@ class MainActivity : AppCompatActivity() {
         
         selectionStart = player.currentPosition
         if (selectionEnd != -1 && selectionStart > selectionEnd) {
-            // Если начало позже конца, меняем местами
             val temp = selectionStart
             selectionStart = selectionEnd
             selectionEnd = temp
         }
         
+        saveSelectionToHistory()
         updateSelectionInfo()
         Toast.makeText(this, "Начало: ${formatTime(selectionStart)}", Toast.LENGTH_SHORT).show()
     }
@@ -446,12 +450,12 @@ class MainActivity : AppCompatActivity() {
         
         selectionEnd = player.currentPosition
         if (selectionStart != -1 && selectionEnd < selectionStart) {
-            // Если конец раньше начала, меняем местами
             val temp = selectionEnd
             selectionEnd = selectionStart
             selectionStart = temp
         }
         
+        saveSelectionToHistory()
         updateSelectionInfo()
         Toast.makeText(this, "Конец: ${formatTime(selectionEnd)}", Toast.LENGTH_SHORT).show()
     }
@@ -460,8 +464,22 @@ class MainActivity : AppCompatActivity() {
         selectionStart = -1
         selectionEnd = -1
         isLoopingSelection = false
+        
+        saveSelectionToHistory()
         updateSelectionInfo()
         Toast.makeText(this, "Выделение сброшено", Toast.LENGTH_SHORT).show()
+    }
+    
+    private fun saveSelectionToHistory() {
+        val index = historyList.indexOfFirst { it.uriString == currentUriString }
+        if (index >= 0) {
+            val oldItem = historyList[index]
+            historyList[index] = oldItem.copy(
+                selectionStart = selectionStart,
+                selectionEnd = selectionEnd
+            )
+            saveHistory()
+        }
     }
     
     private fun updateSelectionInfo() {
@@ -550,9 +568,10 @@ class MainActivity : AppCompatActivity() {
     
     // ============ ИСТОРИЯ ============
     
-    private fun addToHistory(fileName: String, uriString: String, pauseSeconds: Long) {
+    private fun addToHistory(fileName: String, uriString: String, pauseSeconds: Long, 
+                             selStart: Int = -1, selEnd: Int = -1) {
         historyList.removeAll { it.uriString == uriString }
-        historyList.add(0, HistoryItem(fileName, uriString, pauseSeconds))
+        historyList.add(0, HistoryItem(fileName, uriString, pauseSeconds, selStart, selEnd))
         
         if (historyList.size > MAX_HISTORY) {
             historyList = historyList.take(MAX_HISTORY).toMutableList()
@@ -586,8 +605,10 @@ class MainActivity : AppCompatActivity() {
             
             extractWaveform(uri)
             
-            // Сбрасываем выделение при загрузке из истории
-            clearSelection()
+            // Восстанавливаем выделение из истории
+            selectionStart = item.selectionStart
+            selectionEnd = item.selectionEnd
+            updateSelectionInfo()
             
             val pauseIndex = PAUSE_VALUES.indexOf(item.pauseSeconds)
             if (pauseIndex >= 0) {
@@ -614,6 +635,8 @@ class MainActivity : AppCompatActivity() {
                 put("fileName", item.fileName)
                 put("uriString", item.uriString)
                 put("pauseSeconds", item.pauseSeconds)
+                put("selectionStart", item.selectionStart)
+                put("selectionEnd", item.selectionEnd)
             }
             jsonArray.put(jsonObject)
         }
@@ -631,7 +654,9 @@ class MainActivity : AppCompatActivity() {
                     HistoryItem(
                         jsonObject.getString("fileName"),
                         jsonObject.getString("uriString"),
-                        jsonObject.getLong("pauseSeconds")
+                        jsonObject.getLong("pauseSeconds"),
+                        jsonObject.optInt("selectionStart", -1),
+                        jsonObject.optInt("selectionEnd", -1)
                     )
                 )
             }
@@ -701,13 +726,11 @@ class MainActivity : AppCompatActivity() {
                 trackDuration = duration
                 setVolume(1.0f, 1.0f)
                 
-                // Если выделен участок, начинаем с начала участка
                 if (selectionStart != -1 && selectionEnd != -1 && selectionStart < selectionEnd) {
                     seekTo(selectionStart)
                 } else if (selectionStart != -1) {
                     seekTo(selectionStart)
                 } else if (selectionEnd != -1) {
-                    // Если только конец, начинаем с начала
                     seekTo(0)
                 }
                 
@@ -762,9 +785,7 @@ class MainActivity : AppCompatActivity() {
                 if (player != null && player.isPlaying && trackDuration > 0) {
                     val currentPosition = player.currentPosition
                     
-                    // Вычисляем прогресс относительно всего трека или выделенного участка
                     val progress = if (selectionStart != -1 && selectionEnd != -1 && selectionStart < selectionEnd) {
-                        // Прогресс в пределах выделенного участка
                         val rangeLength = (selectionEnd - selectionStart).toFloat()
                         if (rangeLength > 0) {
                             (currentPosition - selectionStart).toFloat() / rangeLength
@@ -772,18 +793,14 @@ class MainActivity : AppCompatActivity() {
                             0f
                         }
                     } else {
-                        // Прогресс всего трека
                         currentPosition.toFloat() / trackDuration.toFloat()
                     }
                     
                     historyAdapter?.updateProgress(progress.coerceIn(0f, 1f))
                     
-                    // Проверяем, не достигли ли конца выделенного участка
                     if (selectionStart != -1 && selectionEnd != -1 && selectionStart < selectionEnd) {
                         if (currentPosition >= selectionEnd) {
-                            // Достигли конца участка - перематываем на начало
                             player.seekTo(selectionStart)
-                            // Продолжаем воспроизведение
                         }
                     }
                     
